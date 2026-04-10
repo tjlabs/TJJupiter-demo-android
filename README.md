@@ -1,16 +1,18 @@
 # TJJupiter-demo-android
 
+## Overview
+
 TJJupiter-demo-android is a minimal Android sample app for integrating **TJLabs Jupiter SDK**.
 
-It demonstrates a simple Jupiter service lifecycle with:
+This demo app uses **TJLabs Jupiter SDK 2.0.1**.
+
+The app demonstrates a simple Jupiter service lifecycle with:
 - Authentication (`AUTH`)
 - Service start (`START`)
 - Service stop (`STOP`)
 - Mocking mode toggle (`MOCK TOGGLE`)
 
-The UI is intentionally simple: full-width action buttons and a log panel.
-
----
+The UI is intentionally simple: full-width action buttons and a fixed log panel.
 
 ## Features
 
@@ -19,8 +21,6 @@ The UI is intentionally simple: full-width action buttons and a log panel.
 - Mocking mode ON/OFF toggle
 - Runtime permission request flow
 - Minimal UI for SDK integration testing
-
----
 
 ## Requirements
 
@@ -42,9 +42,7 @@ Runtime permission check in this demo requires:
 - Location (`FINE` or `COARSE`)
 - Bluetooth scan/connect on Android 12+
 
----
-
-## Installation
+## Setup
 
 Add JitPack repository:
 
@@ -62,10 +60,8 @@ dependencyResolutionManagement {
 Add dependency:
 
 ```kotlin
-implementation("com.github.tjlabs:TJLabsJupiter-sdk-android:<latest-version>")
+implementation("com.github.tjlabs:TJLabsJupiter-sdk-android:2.0.1")
 ```
-
----
 
 ## Quick Guide
 
@@ -87,6 +83,13 @@ val manager = JupiterServiceManager(application, userId)
 
 ### 3. Authenticate
 
+Input:
+- `accessKey: String`
+- `accessSecretKey: String`
+
+Output:
+- callback `(code: Int, success: Boolean)`
+
 ```kotlin
 manager.auth(accessKey, accessSecretKey) { code, success ->
     // handle auth result
@@ -94,6 +97,18 @@ manager.auth(accessKey, accessSecretKey) { code, success ->
 ```
 
 ### 4. Start service
+
+Input:
+- `region: String` (example: `JupiterRegion.KOREA.value`)
+- `sectorId: Int` (this demo uses `20`)
+- `mode: UserMode` (this demo uses `UserMode.MODE_VEHICLE`)
+- `callback: JupiterServiceManager.JupiterCallback`
+
+Output:
+- `onJupiterSuccess(isSuccess)`
+- `onJupiterError(code, message)`
+- `onJupiterResult(result)`
+- optional report/navigation callbacks
 
 ```kotlin
 manager.startService(
@@ -104,7 +119,18 @@ manager.startService(
 )
 ```
 
+Sector ID note:
+- `sectorId = 20` corresponds to **Songdo Convensia**.
+- Sector IDs are assigned and managed by TJLabs.
+- For production usage, use the sector ID provided by TJLabs.
+
 ### 5. Stop service
+
+Input:
+- no input parameters
+
+Output:
+- callback `(success: Boolean, message: String)`
 
 ```kotlin
 manager.stopService { success, message ->
@@ -114,129 +140,13 @@ manager.stopService { success, message ->
 
 ### 6. Toggle mocking mode
 
+Input:
+- `enabled: Boolean`
+
+Output:
+- mock mode state changes in SDK and sample log/toast feedback
+
 ```kotlin
 manager.setMockingMode(true)  // ON
 manager.setMockingMode(false) // OFF
-```
-
----
-
-## Callback Interface
-
-`JupiterServiceManager.JupiterCallback`
-
-```kotlin
-interface JupiterCallback {
-    fun onJupiterSuccess(isSuccess: Boolean)
-    fun onJupiterReport(flag: Int) {}
-    fun onJupiterError(code: Int, message: String)
-    fun onJupiterResult(result: JupiterResult)
-    fun onNavigationRouteChanged(routePos: List<List<Float>>) {}
-    fun onNavigationRouteFailed(code: Int, message: String) {}
-    fun onUserGuidanceOut() {}
-}
-```
-
----
-
-## Position Result
-
-### JupiterResult
-
-```kotlin
-data class JupiterResult(
-    val mobile_time: Long,
-    val index: Int,
-    val building_name: String,
-    val level_name: String,
-    val jupiter_pos: PositionRequest,
-    val navi_pos: PositionRequest?,
-    val llh: LLH?,
-    val velocity: Float,
-    val is_vehicle: Boolean,
-    val is_indoor: Boolean,
-    val validity_flag: Int
-)
-```
-
-### PositionRequest
-
-```kotlin
-data class PositionRequest(
-    val x: Float,
-    val y: Float,
-    val heading: Float
-)
-```
-
-### LLH
-
-```kotlin
-data class LLH(
-    var lat: Float,
-    var lon: Float,
-    var heading: Float
-)
-```
-
----
-
-## Core Enums
-
-### JupiterRegion
-
-```kotlin
-enum class JupiterRegion(val value: String) {
-    KOREA,
-    US_EAST,
-    CANADA
-}
-```
-
-### UserMode
-
-`UserMode` is provided by `TJLabsCommon-sdk-android`.
-
-This demo uses:
-
-```kotlin
-UserMode.MODE_VEHICLE
-```
-
----
-
-## Sector ID Note
-
-- This demo uses `sectorId = 20`, which corresponds to **Songdo Convensia**.
-- Sector IDs are assigned and managed by TJLabs.
-- For production usage, use the sector ID provided by TJLabs.
-
----
-
-## Demo App Defaults
-
-- `region`: `KOREA`
-- `sectorId`: `20`
-- `mode`: `MODE_VEHICLE`
-- `userId`: `sample_user_android`
-
----
-
-## Example (from this demo)
-
-```kotlin
-jupiterService.auth(accessKey, accessSecretKey) { _, success ->
-    if (!success) return@auth
-
-    jupiterService.startService(
-        JupiterRegion.KOREA.value,
-        20,
-        UserMode.MODE_VEHICLE,
-        object : JupiterServiceManager.JupiterCallback {
-            override fun onJupiterSuccess(isSuccess: Boolean) {}
-            override fun onJupiterError(code: Int, message: String) {}
-            override fun onJupiterResult(result: JupiterResult) {}
-        }
-    )
-}
 ```
