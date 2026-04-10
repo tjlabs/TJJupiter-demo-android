@@ -4,7 +4,7 @@
 
 TJJupiter-demo-android is a minimal Android sample app for integrating **TJLabs Jupiter SDK**.
 
-This demo app uses **TJLabs Jupiter SDK 2.0.1**.
+This demo app uses **TJLabs Jupiter SDK 2.0.2**.
 
 The app demonstrates a simple Jupiter service lifecycle with:
 - Authentication (`AUTH`)
