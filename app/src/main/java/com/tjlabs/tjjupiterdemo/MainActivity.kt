@@ -13,6 +13,10 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import com.tjlabs.tjlabsjupiter_sdk_android.InOutState
+import com.tjlabs.tjlabsjupiter_sdk_android.JupiterErrorCode
+import com.tjlabs.tjlabsjupiter_sdk_android.JupiterNavigationRoute
+import com.tjlabs.tjlabsjupiter_sdk_android.JupiterServiceCode
 import com.tjlabs.tjlabscommon_sdk_android.uvd.UserMode
 import com.tjlabs.tjlabsjupiter_sdk_android.JupiterServiceManager
 import com.tjlabs.tjlabsjupiter_sdk_android.api.JupiterRegion
@@ -112,23 +116,17 @@ class MainActivity : AppCompatActivity() {
             region,
             sectorId,
             userMode,
-            object : JupiterServiceManager.JupiterCallback {
-                override fun onJupiterSuccess(isSuccess: Boolean) {
+            object : JupiterServiceManager.JupiterServiceManagerDelegate {
+                override fun onJupiterSuccess(isSuccess: Boolean, code: JupiterErrorCode?) {
                     runOnUiThread {
                         isServiceRunning = isSuccess
-                        appendLog("START 콜백: onJupiterSuccess=$isSuccess")
+                        appendLog("START 콜백: success=$isSuccess, errorCode=$code")
                     }
                 }
 
-                override fun onJupiterError(code: Int, message: String) {
+                override fun onJupiterReport(code: JupiterServiceCode, msg: String) {
                     runOnUiThread {
-                        appendLog("Jupiter Error: code=$code, message=$message")
-                    }
-                }
-
-                override fun onJupiterReport(flag: Int) {
-                    runOnUiThread {
-                        appendLog("Jupiter Report: flag=$flag")
+                        appendLog("Jupiter Report: code=$code, msg=$msg")
                     }
                 }
 
@@ -141,21 +139,33 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
 
-                override fun onNavigationRouteChanged(routePos: MutableList<out MutableList<Float>>) {
+                override fun isJupiterInOutStateChanged(state: InOutState) {
                     runOnUiThread {
-                        appendLog("Route changed: points=${routePos.size}")
+                        appendLog("InOut state changed: $state")
                     }
                 }
 
-                override fun onNavigationRouteFailed(code: Int, message: String) {
-                    runOnUiThread {
-                        appendLog("Route failed: code=$code, message=$message")
-                    }
-                }
-
-                override fun onUserGuidanceOut() {
+                override fun isUserGuidanceOut() {
                     runOnUiThread {
                         appendLog("User guidance out")
+                    }
+                }
+
+                override fun isNavigationRouteChanged(routes: List<JupiterNavigationRoute>) {
+                    runOnUiThread {
+                        appendLog("Route changed: points=${routes.size}")
+                    }
+                }
+
+                override fun isNavigationRouteFailed() {
+                    runOnUiThread {
+                        appendLog("Route failed")
+                    }
+                }
+
+                override fun isWaypointChanged(waypoints: List<List<Double>>) {
+                    runOnUiThread {
+                        appendLog("Waypoint changed: points=${waypoints.size}")
                     }
                 }
             }

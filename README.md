@@ -102,13 +102,21 @@ Input:
 - `region: String` (example: `JupiterRegion.KOREA.value`)
 - `sectorId: Int` (this demo uses `20`)
 - `mode: UserMode` (this demo uses `UserMode.MODE_VEHICLE`)
-- `callback: JupiterServiceManager.JupiterCallback`
+- `callback: JupiterServiceManager.JupiterServiceManagerDelegate`
 
 Output:
-- `onJupiterSuccess(isSuccess)`
-- `onJupiterError(code, message)`
+- `onJupiterSuccess(isSuccess, code)`
+- `onJupiterReport(code, msg)`
 - `onJupiterResult(result)`
-- optional report/navigation callbacks
+- optional in/out and navigation callbacks
+
+```kotlin
+val callback = object : JupiterServiceManager.JupiterServiceManagerDelegate {
+    override fun onJupiterSuccess(isSuccess: Boolean, code: JupiterErrorCode?) {}
+    override fun onJupiterReport(code: JupiterServiceCode, msg: String) {}
+    override fun onJupiterResult(result: JupiterResult) {}
+}
+```
 
 ```kotlin
 manager.startService(
