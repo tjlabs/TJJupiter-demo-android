@@ -115,6 +115,11 @@ val callback = object : JupiterServiceManager.JupiterServiceManagerDelegate {
     override fun onJupiterSuccess(isSuccess: Boolean, code: JupiterErrorCode?) {}
     override fun onJupiterReport(code: JupiterServiceCode, msg: String) {}
     override fun onJupiterResult(result: JupiterResult) {}
+    override fun isJupiterInOutStateChanged(state: InOutState) {}
+    override fun isUserGuidanceOut() {}
+    override fun isNavigationRouteChanged(routes: MutableList<JupiterNavigationRoute>) {}
+    override fun isNavigationRouteFailed() {}
+    override fun isWaypointChanged(waypoints: MutableList<out MutableList<Double>>) {}
 }
 ```
 
