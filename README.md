@@ -33,7 +33,10 @@ The UI is intentionally simple: full-width action buttons and a fixed log panel.
 Declare in `AndroidManifest.xml`:
 
 - `android.permission.INTERNET`
+- `android.permission.ACCESS_NETWORK_STATE`
 - `android.permission.ACCESS_FINE_LOCATION`
+- `android.permission.BLUETOOTH` (Android 11 and below)
+- `android.permission.BLUETOOTH_ADMIN` (Android 11 and below)
 - `android.permission.BLUETOOTH_SCAN` (Android 12+)
 
 Runtime permission check in this demo requires:
