@@ -18,9 +18,11 @@ import com.tjlabs.tjlabsjupiter_sdk_android.JupiterErrorCode
 import com.tjlabs.tjlabsjupiter_sdk_android.JupiterNavigationRoute
 import com.tjlabs.tjlabsjupiter_sdk_android.JupiterServiceCode
 import com.tjlabs.tjlabscommon_sdk_android.uvd.UserMode
+import com.tjlabs.tjlabsjupiter_sdk_android.InitErrorCode
 import com.tjlabs.tjlabsjupiter_sdk_android.JupiterServiceManager
 import com.tjlabs.tjlabsjupiter_sdk_android.api.JupiterRegion
 import com.tjlabs.tjlabsjupiter_sdk_android.api.JupiterResult
+import com.tjlabs.tjlabsresource_sdk_android.ServerProvider
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -31,6 +33,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var jupiterService: JupiterServiceManager
 
     private var isAuthed = false
+    private var isInitialized = false
     private var isServiceRunning = false
     private var isMockModeEnabled = false
     private var didInitialPermissionRequest = false
@@ -47,6 +50,67 @@ class MainActivity : AppCompatActivity() {
     // local.properties 또는 Gradle property에서 주입받는 값
     private val accessKey: String by lazy { BuildConfig.AUTH_ACCESS_KEY }
     private val accessSecretKey: String by lazy { BuildConfig.AUTH_SECRET_ACCESS_KEY }
+
+    private val jupiterCallback = object : JupiterServiceManager.JupiterServiceManagerDelegate {
+        override fun onInitSuccess(isSuccess: Boolean, errorCode: InitErrorCode?) {
+            runOnUiThread {
+                isInitialized = isSuccess
+                appendLog("INIT 결과: success=$isSuccess, errorCode=$errorCode")
+            }
+        }
+
+        override fun onJupiterSuccess(isSuccess: Boolean, code: JupiterErrorCode?) {
+            runOnUiThread {
+                isServiceRunning = isSuccess
+                appendLog("START 콜백: success=$isSuccess, errorCode=$code")
+            }
+        }
+
+        override fun onJupiterReport(code: JupiterServiceCode, msg: String) {
+            runOnUiThread {
+                appendLog("Jupiter Report: code=$code, msg=$msg")
+            }
+        }
+
+        override fun onJupiterResult(result: JupiterResult) {
+            runOnUiThread {
+                appendLog(
+                    "Result: building=${result.building_name}, level=${result.level_name}, " +
+                        "x=${"%.2f".format(result.jupiter_pos.x)}, y=${"%.2f".format(result.jupiter_pos.y)}"
+                )
+            }
+        }
+
+        override fun isJupiterInOutStateChanged(state: InOutState) {
+            runOnUiThread {
+                appendLog("InOut state changed: $state")
+            }
+        }
+
+        override fun isUserGuidanceOut() {
+            runOnUiThread {
+                appendLog("User guidance out")
+            }
+        }
+
+        override fun isNavigationRouteChanged(routes: List<JupiterNavigationRoute>) {
+            runOnUiThread {
+                appendLog("Route changed: points=${routes.size}")
+            }
+        }
+
+        override fun isNavigationRouteFailed() {
+            runOnUiThread {
+                appendLog("Route failed")
+            }
+        }
+
+        override fun isWaypointChanged(waypoints: List<List<Double>>) {
+            runOnUiThread {
+                appendLog("Waypoint changed: points=${waypoints.size}")
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -87,19 +151,38 @@ class MainActivity : AppCompatActivity() {
         }
 
         appendLog("AUTH 요청...")
-        jupiterService.auth(accessKey, accessSecretKey) { code, success ->
+        isAuthed = false
+        isInitialized = false
+        JupiterServiceManager.setAuthServer(ServerProvider.AWS.value, region)
+        JupiterServiceManager.auth(application, accessKey, accessSecretKey) { code, success ->
             runOnUiThread {
                 isAuthed = success
                 appendLog("AUTH 결과: success=$success, code=$code")
+                if (success) {
+                    appendLog("INIT 요청... provider=${ServerProvider.AWS.value}, region=$region, sectorId=$sectorId")
+                    jupiterService.initialize(
+                        sectorId,
+                        jupiterCallback
+                    )
+                }
             }
         }
     }
 
     private fun startJupiter() {
         // [Jupiter SDK 사용법 #2] 시작
-        // startService(region, sectorId, mode, callback) 호출로 측위를 시작한다.
+        // 2.0.5 기준: startService(mode, callback) 호출로 측위를 시작한다.
+        if (isServiceRunning) {
+            appendLog("이미 Jupiter 서비스가 실행 중입니다.")
+            return
+        }
+
         if (!isAuthed) {
             appendLog("START 전에 AUTH를 먼저 수행하세요.")
+            return
+        }
+        if (!isInitialized) {
+            appendLog("START 전에 INIT 성공이 필요합니다. AUTH 후 INIT 결과를 확인하세요.")
             return
         }
 
@@ -111,65 +194,8 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        appendLog("START 요청... region=$region, sectorId=$sectorId")
-        jupiterService.startService(
-            region,
-            sectorId,
-            userMode,
-            object : JupiterServiceManager.JupiterServiceManagerDelegate {
-                override fun onJupiterSuccess(isSuccess: Boolean, code: JupiterErrorCode?) {
-                    runOnUiThread {
-                        isServiceRunning = isSuccess
-                        appendLog("START 콜백: success=$isSuccess, errorCode=$code")
-                    }
-                }
-
-                override fun onJupiterReport(code: JupiterServiceCode, msg: String) {
-                    runOnUiThread {
-                        appendLog("Jupiter Report: code=$code, msg=$msg")
-                    }
-                }
-
-                override fun onJupiterResult(result: JupiterResult) {
-                    runOnUiThread {
-                        appendLog(
-                            "Result: building=${result.building_name}, level=${result.level_name}, " +
-                                "x=${"%.2f".format(result.jupiter_pos.x)}, y=${"%.2f".format(result.jupiter_pos.y)}"
-                        )
-                    }
-                }
-
-                override fun isJupiterInOutStateChanged(state: InOutState) {
-                    runOnUiThread {
-                        appendLog("InOut state changed: $state")
-                    }
-                }
-
-                override fun isUserGuidanceOut() {
-                    runOnUiThread {
-                        appendLog("User guidance out")
-                    }
-                }
-
-                override fun isNavigationRouteChanged(routes: List<JupiterNavigationRoute>) {
-                    runOnUiThread {
-                        appendLog("Route changed: points=${routes.size}")
-                    }
-                }
-
-                override fun isNavigationRouteFailed() {
-                    runOnUiThread {
-                        appendLog("Route failed")
-                    }
-                }
-
-                override fun isWaypointChanged(waypoints: List<List<Double>>) {
-                    runOnUiThread {
-                        appendLog("Waypoint changed: points=${waypoints.size}")
-                    }
-                }
-            }
-        )
+        appendLog("START 요청... mode=${userMode.value}")
+        jupiterService.startService(userMode, jupiterCallback)
     }
 
     private fun stopJupiter() {
@@ -206,8 +232,7 @@ class MainActivity : AppCompatActivity() {
             ActivityCompat.requestPermissions(
                 this,
                 arrayOf(
-                    Manifest.permission.ACCESS_FINE_LOCATION,
-                    Manifest.permission.ACCESS_COARSE_LOCATION
+                    Manifest.permission.ACCESS_FINE_LOCATION
                 ),
                 LOCATION_PERMISSIONS_CODE
             )
@@ -219,9 +244,6 @@ class MainActivity : AppCompatActivity() {
             val missingBluetooth = mutableListOf<String>()
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED) {
                 missingBluetooth += Manifest.permission.BLUETOOTH_SCAN
-            }
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-                missingBluetooth += Manifest.permission.BLUETOOTH_CONNECT
             }
             if (missingBluetooth.isNotEmpty()) {
                 ActivityCompat.requestPermissions(
@@ -242,14 +264,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun hasLocationPermission(): Boolean {
-        return ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
-            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        return ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
     }
 
     private fun hasBluetoothPermissions(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED &&
-                ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
+            ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED
         } else {
             true
         }
@@ -261,7 +281,7 @@ class MainActivity : AppCompatActivity() {
             missing += "LOCATION"
         }
         if (!hasBluetoothPermissions() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            missing += "BLUETOOTH_SCAN/CONNECT"
+            missing += "BLUETOOTH_SCAN"
         }
         return if (missing.isEmpty()) "없음" else missing.joinToString(", ")
     }
@@ -273,18 +293,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun logPermissionState(context: String) {
         val fine = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        val coarse = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
         val scan = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED
         } else {
             true
         }
-        val connect = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
-        } else {
-            true
-        }
-        appendLog("perm[$context] fine=$fine coarse=$coarse scan=$scan connect=$connect")
+        appendLog("perm[$context] fine=$fine scan=$scan")
     }
 
     private fun openAppSettings() {
@@ -308,8 +322,7 @@ class MainActivity : AppCompatActivity() {
                 } else {
                     appendLog("위치 권한 미허용")
                     val canAskAgain =
-                        ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.ACCESS_FINE_LOCATION) ||
-                            ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.ACCESS_COARSE_LOCATION)
+                        ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.ACCESS_FINE_LOCATION)
                     if (!canAskAgain) {
                         showManualPermissionGuide("LOCATION")
                         openAppSettings()
@@ -323,8 +336,7 @@ class MainActivity : AppCompatActivity() {
                 } else {
                     appendLog("블루투스 권한 미허용")
                     val canAskAgain =
-                        ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.BLUETOOTH_SCAN) ||
-                            ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.BLUETOOTH_CONNECT)
+                        ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.BLUETOOTH_SCAN)
                     if (!canAskAgain) {
                         showManualPermissionGuide("BLUETOOTH")
                         openAppSettings()

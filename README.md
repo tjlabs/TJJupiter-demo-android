@@ -4,7 +4,7 @@
 
 TJJupiter-demo-android is a minimal Android sample app for integrating **TJLabs Jupiter SDK**.
 
-This demo app uses **TJLabs Jupiter SDK 2.0.2**.
+This demo app uses **TJLabs Jupiter SDK 2.0.5**.
 
 The app demonstrates a simple Jupiter service lifecycle with:
 - Authentication (`AUTH`)
@@ -34,13 +34,11 @@ Declare in `AndroidManifest.xml`:
 
 - `android.permission.INTERNET`
 - `android.permission.ACCESS_FINE_LOCATION`
-- `android.permission.ACCESS_COARSE_LOCATION`
 - `android.permission.BLUETOOTH_SCAN` (Android 12+)
-- `android.permission.BLUETOOTH_CONNECT` (Android 12+)
 
 Runtime permission check in this demo requires:
-- Location (`FINE` or `COARSE`)
-- Bluetooth scan/connect on Android 12+
+- Location (`FINE`)
+- Bluetooth scan on Android 12+
 
 ## Setup
 
@@ -60,7 +58,7 @@ dependencyResolutionManagement {
 Add dependency:
 
 ```kotlin
-implementation("com.github.tjlabs:TJLabsJupiter-sdk-android:2.0.1")
+implementation("com.tjlabs:TJLabsJupiter-sdk-android:2.0.5")
 ```
 
 ## Quick Guide
@@ -91,16 +89,47 @@ Output:
 - callback `(code: Int, success: Boolean)`
 
 ```kotlin
-manager.auth(accessKey, accessSecretKey) { code, success ->
+JupiterServiceManager.auth(application, accessKey, accessSecretKey) { code, success ->
     // handle auth result
 }
 ```
 
-### 4. Start service
+### 4. Initialize service
 
 Input:
-- `region: String` (example: `JupiterRegion.KOREA.value`)
-- `sectorId: Int` (this demo uses `20`)
+- `provider: String` (default: `ServerProvider.AWS.value`)
+- `region: String` (default: `JupiterRegion.KOREA.value`)
+- `sectorId: Int`
+- `callback: JupiterServiceManager.JupiterServiceManagerDelegate`
+
+Output:
+- `onInitSuccess(isSuccess, errorCode)`
+
+Explicit example:
+
+```kotlin
+JupiterServiceManager.setAuthServer(ServerProvider.AWS.value, JupiterRegion.KOREA.value)
+
+manager.initialize(
+    ServerProvider.AWS.value,
+    JupiterRegion.KOREA.value,
+    sectorId,
+    callback
+)
+```
+
+Default-value example (`provider`, `region` omitted):
+
+```kotlin
+manager.initialize(
+    sectorId = sectorId,
+    callback = callback
+)
+```
+
+### 5. Start service
+
+Input:
 - `mode: UserMode` (this demo uses `UserMode.MODE_VEHICLE`)
 - `callback: JupiterServiceManager.JupiterServiceManagerDelegate`
 
@@ -112,19 +141,20 @@ Output:
 
 ```kotlin
 val callback = object : JupiterServiceManager.JupiterServiceManagerDelegate {
+    override fun onInitSuccess(isSuccess: Boolean, errorCode: InitErrorCode?) {}
     override fun onJupiterSuccess(isSuccess: Boolean, code: JupiterErrorCode?) {}
     override fun onJupiterReport(code: JupiterServiceCode, msg: String) {}
     override fun onJupiterResult(result: JupiterResult) {}
+    override fun isJupiterInOutStateChanged(state: InOutState) {}
+    override fun isUserGuidanceOut() {}
+    override fun isNavigationRouteChanged(routes: List<JupiterNavigationRoute>) {}
+    override fun isNavigationRouteFailed() {}
+    override fun isWaypointChanged(waypoints: List<List<Double>>) {}
 }
 ```
 
 ```kotlin
-manager.startService(
-    JupiterRegion.KOREA.value,
-    sectorId,
-    UserMode.MODE_VEHICLE,
-    callback
-)
+manager.startService(UserMode.MODE_VEHICLE, callback)
 ```
 
 Sector ID note:
@@ -132,7 +162,7 @@ Sector ID note:
 - Sector IDs are assigned and managed by TJLabs.
 - For production usage, use the sector ID provided by TJLabs.
 
-### 5. Stop service
+### 6. Stop service
 
 Input:
 - no input parameters
@@ -146,7 +176,7 @@ manager.stopService { success, message ->
 }
 ```
 
-### 6. Toggle mocking mode
+### 7. Toggle mocking mode
 
 Input:
 - `enabled: Boolean`
@@ -157,4 +187,45 @@ Output:
 ```kotlin
 manager.setMockingMode(true)  // ON
 manager.setMockingMode(false) // OFF
+```
+
+### 8. Lifecycle order (required)
+
+`2.0.5` lifecycle must follow:
+1. `JupiterServiceManager.setAuthServer(...)` (optional but recommended)
+2. `JupiterServiceManager.auth(...)`
+3. `manager.initialize(...)`
+4. `manager.startService(...)`
+
+If `startService` is called before `initialize` success, SDK can return init-related error flow.
+
+## JVM Annotation Support (2.0.5)
+
+`JupiterServiceManager` now includes JVM annotations for Java interoperability:
+
+- `@JvmStatic`
+  - `setSdkInfos(...)`
+  - `setAuthServer(...)`
+  - `auth(...)`
+- `@JvmOverloads`
+  - `setAuthServer(provider, region = KOREA)`
+  - `initialize(provider = ..., region = ..., sectorId, callback)`
+  - `startService(mode = MODE_VEHICLE, callback)`
+
+Default behavior:
+- If `provider` and `region` are omitted in `initialize(...)`, SDK uses current auth server config.
+- Initial default is `provider=AWS`, `region=KOREA`.
+
+### Java usage example
+
+```java
+JupiterServiceManager.setAuthServer(ServerProvider.AWS.getValue(), JupiterRegion.KOREA.getValue());
+
+JupiterServiceManager.auth(getApplication(), accessKey, secretKey, (code, success) -> {
+    if (!success) return;
+
+    JupiterServiceManager manager = new JupiterServiceManager(getApplication(), "sample_user_android");
+    manager.initialize(ServerProvider.AWS.getValue(), JupiterRegion.KOREA.getValue(), 20, callback);
+    manager.startService(UserMode.MODE_VEHICLE, callback);
+});
 ```
