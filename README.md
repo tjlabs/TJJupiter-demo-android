@@ -61,7 +61,7 @@ dependencyResolutionManagement {
 Add dependency:
 
 ```kotlin
-implementation("com.tjlabs:TJLabsJupiter-sdk-android:2.0.6")
+implementation("com.github.tjlabs:TJLabsJupiter-sdk-android:2.0.6")
 ```
 
 ## Quick Guide
