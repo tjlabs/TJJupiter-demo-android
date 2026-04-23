@@ -20,6 +20,8 @@ val authAccessKey: String = providers.gradleProperty("AUTH_ACCESS_KEY").orNull
     ?: localProperties.getProperty("AUTH_ACCESS_KEY", "")
 val authSecretAccessKey: String = providers.gradleProperty("AUTH_SECRET_ACCESS_KEY").orNull
     ?: localProperties.getProperty("AUTH_SECRET_ACCESS_KEY", "")
+val jupiterSdkVersion: String = providers.gradleProperty("JUPITER_SDK_VERSION").orNull
+    ?: "2.0.6"
 
 android {
     namespace = "com.tjlabs.tjjupiterdemo"
@@ -74,5 +76,35 @@ dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("com.google.android.material:material:1.12.0")
-    implementation("com.github.tjlabs:TJLabsJupiter-sdk-android:2.0.6")
+    implementation("com.github.tjlabs:TJLabsJupiter-sdk-android:$jupiterSdkVersion")
+}
+
+val syncReadmeJupiterVersion by tasks.registering {
+    group = "documentation"
+    description = "Sync Jupiter SDK version in README.md with JUPITER_SDK_VERSION."
+
+    doLast {
+        val readmeFile = rootProject.file("README.md")
+        if (!readmeFile.exists()) return@doLast
+
+        val current = readmeFile.readText()
+        val updated = current
+            .replace(
+                Regex("""This demo app uses \*\*TJLabs Jupiter SDK [^*]+\*\*\."""),
+                "This demo app uses **TJLabs Jupiter SDK $jupiterSdkVersion**."
+            )
+            .replace(
+                Regex("""implementation\("com\.tjlabs:TJLabsJupiter-sdk-android:[^"]+"\)"""),
+                """implementation("com.tjlabs:TJLabsJupiter-sdk-android:$jupiterSdkVersion")"""
+            )
+
+        if (updated != current) {
+            readmeFile.writeText(updated)
+            println("README.md synced to Jupiter SDK version: $jupiterSdkVersion")
+        }
+    }
+}
+
+tasks.named("preBuild").configure {
+    dependsOn(syncReadmeJupiterVersion)
 }
