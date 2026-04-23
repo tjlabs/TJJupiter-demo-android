@@ -94,8 +94,8 @@ val syncReadmeJupiterVersion by tasks.registering {
                 "This demo app uses **TJLabs Jupiter SDK $jupiterSdkVersion**."
             )
             .replace(
-                Regex("""implementation\("com\.tjlabs:TJLabsJupiter-sdk-android:[^"]+"\)"""),
-                """implementation("com.tjlabs:TJLabsJupiter-sdk-android:$jupiterSdkVersion")"""
+                Regex("""implementation\("com\.github\.tjlabs:TJLabsJupiter-sdk-android:[^"]+"\)"""),
+                """implementation("com.github.tjlabs:TJLabsJupiter-sdk-android:$jupiterSdkVersion")"""
             )
 
         if (updated != current) {
