@@ -21,7 +21,7 @@ val authAccessKey: String = providers.gradleProperty("AUTH_ACCESS_KEY").orNull
 val authSecretAccessKey: String = providers.gradleProperty("AUTH_SECRET_ACCESS_KEY").orNull
     ?: localProperties.getProperty("AUTH_SECRET_ACCESS_KEY", "")
 val jupiterSdkVersion: String = providers.gradleProperty("JUPITER_SDK_VERSION").orNull
-    ?: "2.0.7"
+    ?: "2.0.14"
 
 android {
     namespace = "com.tjlabs.tjjupiterdemo"
