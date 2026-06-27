@@ -4,7 +4,7 @@
 
 TJJupiter-demo-android is a minimal Android sample app for integrating **TJLabs Jupiter SDK**.
 
-This demo app uses **TJLabs Jupiter SDK 2.0.14**.
+This demo app uses **TJLabs Jupiter SDK 2.0.17**.
 
 The app demonstrates a simple Jupiter service lifecycle with:
 - Authentication (`AUTH`)
@@ -64,7 +64,7 @@ dependencyResolutionManagement {
 Add dependency:
 
 ```kotlin
-implementation("com.github.tjlabs:TJLabsJupiter-sdk-android:2.0.14")
+implementation("com.github.tjlabs:TJLabsJupiter-sdk-android:2.0.17")
 ```
 
 Set credentials in `local.properties`:
@@ -85,7 +85,7 @@ val manager = JupiterServiceManager(application, "sample_user_android")
 
 ### 2. Configure Server And Authenticate
 
-In SDK 2.0.14, server configuration and authentication are handled by `TJJupiterAuth`.
+In SDK 2.0.17, server configuration and authentication are handled by `TJJupiterAuth`.
 
 Default server config is `GCP / KOREA`, but this demo sets it explicitly before auth:
 
@@ -163,7 +163,7 @@ Output:
 
 ### 6. Mock Data Items
 
-SDK 2.0.14 uses item-based mock data.
+SDK 2.0.17 uses item-based mock data.
 
 Select a `JupiterMockMode`, apply it with `setMockMode(...)`, then start the service.
 
@@ -185,7 +185,7 @@ Demo app flow:
 
 ### 7. Replay
 
-SDK 2.0.14 organizes replay execution around replay file names.
+SDK 2.0.17 organizes replay execution around replay file names.
 
 ```kotlin
 manager.startReplayJupiterService(
@@ -238,7 +238,7 @@ Required order:
 
 If `startService(...)` is called before auth and initialize success, SDK can return an initialization or authorization error flow.
 
-## 2.0.14 Notes
+## 2.0.17 Notes
 
 - Auth and server config are centered on `TJJupiterAuth`.
 - Default server config is `GCP / KOREA`.
