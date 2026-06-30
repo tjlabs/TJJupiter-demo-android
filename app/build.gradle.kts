@@ -77,6 +77,10 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("com.google.android.material:material:1.12.0")
     implementation("com.github.tjlabs:TJLabsJupiter-sdk-android:$jupiterSdkVersion")
+
+    androidTestImplementation("androidx.test.ext:junit:1.1.5")
+    androidTestImplementation("androidx.test:runner:1.5.2")
+    androidTestImplementation("androidx.test:rules:1.5.0")
 }
 
 val syncReadmeJupiterVersion by tasks.registering {
