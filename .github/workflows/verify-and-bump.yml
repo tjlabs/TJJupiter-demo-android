@@ -121,13 +121,13 @@ jobs:
           force-avd-creation: false
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
-          script: |
-            ./gradlew :app:connectedDebugAndroidTest \
-              -Pandroid.testInstrumentationRunnerArguments.class=com.tjlabs.tjjupiterdemo.JupiterAuthInitTest \
-              -Pandroid.testInstrumentationRunnerArguments.provider=${{ matrix.provider }} \
-              -Pandroid.testInstrumentationRunnerArguments.region=${{ matrix.region }} \
-              -Pandroid.testInstrumentationRunnerArguments.sectorId=${{ needs.resolve-inputs.outputs.sector_id }} \
-              --stacktrace
+          script: >-
+            ./gradlew :app:connectedDebugAndroidTest
+            -Pandroid.testInstrumentationRunnerArguments.class=com.tjlabs.tjjupiterdemo.JupiterAuthInitTest
+            -Pandroid.testInstrumentationRunnerArguments.provider=${{ matrix.provider }}
+            -Pandroid.testInstrumentationRunnerArguments.region=${{ matrix.region }}
+            -Pandroid.testInstrumentationRunnerArguments.sectorId=${{ needs.resolve-inputs.outputs.sector_id }}
+            --stacktrace
 
       - name: Upload test reports
         if: always()
