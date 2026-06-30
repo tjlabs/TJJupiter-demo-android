@@ -161,12 +161,12 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Create bump branch
+      - name: Create release branch
         id: branch
         shell: bash
         run: |
           VERSION="${{ needs.resolve-inputs.outputs.version }}"
-          BRANCH="chore/bump-jupiter-${VERSION}"
+          BRANCH="release/${VERSION}"
           if git ls-remote --exit-code origin "refs/heads/${BRANCH}" >/dev/null 2>&1; then
             echo "::error::Branch ${BRANCH} already exists on origin"
             exit 1
