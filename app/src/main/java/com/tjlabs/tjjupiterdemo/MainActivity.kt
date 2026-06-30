@@ -7,19 +7,25 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
 import android.widget.Button
+import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
+import android.view.View
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.tjlabs.tjlabsjupiter_sdk_android.InOutState
 import com.tjlabs.tjlabsjupiter_sdk_android.JupiterErrorCode
+import com.tjlabs.tjlabsjupiter_sdk_android.JupiterMockMode
 import com.tjlabs.tjlabsjupiter_sdk_android.JupiterNavigationRoute
 import com.tjlabs.tjlabsjupiter_sdk_android.JupiterServiceCode
 import com.tjlabs.tjlabscommon_sdk_android.uvd.UserMode
 import com.tjlabs.tjlabsjupiter_sdk_android.InitErrorCode
 import com.tjlabs.tjlabsjupiter_sdk_android.JupiterServiceManager
+import com.tjlabs.tjlabsjupiter_sdk_android.TJJupiterAuth
 import com.tjlabs.tjlabsjupiter_sdk_android.api.JupiterRegion
 import com.tjlabs.tjlabsjupiter_sdk_android.api.JupiterResult
 import com.tjlabs.tjlabsresource_sdk_android.ServerProvider
@@ -35,10 +41,11 @@ class MainActivity : AppCompatActivity() {
     private var isAuthed = false
     private var isInitialized = false
     private var isServiceRunning = false
-    private var isMockModeEnabled = false
+    private var selectedMockMode = JupiterMockMode.VEHICLE_INDOOR_OUTDOOR
+    private var isMockModeApplied = false
     private var didInitialPermissionRequest = false
 
-    // 샘플 기본값: 코엑스 섹터(20), 차량 모드
+    // 샘플 기본값: 송도 컨벤시아 섹터(20), 차량 모드
     private val sectorId = 20
     private val userMode = UserMode.MODE_VEHICLE
     private val region = JupiterRegion.KOREA.value
@@ -93,9 +100,13 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        override fun isNavigationRouteChanged(routes: List<JupiterNavigationRoute>) {
+        override fun isNavigationRouteChanged(
+            routeId: String?,
+            totalDistance: Int?,
+            routes: List<JupiterNavigationRoute>
+        ) {
             runOnUiThread {
-                appendLog("Route changed: points=${routes.size}")
+                appendLog("Route changed: routeId=$routeId, totalDistance=$totalDistance, points=${routes.size}")
             }
         }
 
@@ -121,16 +132,40 @@ class MainActivity : AppCompatActivity() {
 
         //init
         jupiterService = JupiterServiceManager(application, userId)
+        val spinnerMockMode = findViewById<Spinner>(R.id.spinnerMockMode)
 
         findViewById<Button>(R.id.btnAuth).setOnClickListener { authJupiter() }
         findViewById<Button>(R.id.btnStart).setOnClickListener { startJupiter() }
         findViewById<Button>(R.id.btnStop).setOnClickListener { stopJupiter() }
-        findViewById<Button>(R.id.btnMockToggle).setOnClickListener { toggleMockMode() }
+        findViewById<Button>(R.id.btnMockToggle).setOnClickListener { applyMockMode() }
+
+        val mockModes = JupiterMockMode.values().toList()
+        val mockLabels = mockModes.map { it.name }
+        spinnerMockMode.adapter = ArrayAdapter(
+            this,
+            android.R.layout.simple_spinner_dropdown_item,
+            mockLabels
+        )
+        spinnerMockMode.setSelection(mockModes.indexOf(selectedMockMode).coerceAtLeast(0))
+        spinnerMockMode.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(
+                parent: AdapterView<*>?,
+                view: View?,
+                position: Int,
+                id: Long
+            ) {
+                selectedMockMode = mockModes[position]
+                appendLog("선택된 Mock item: ${selectedMockMode.name}")
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
 
         appendLog("앱 시작")
         appendLog("1) AUTH 버튼으로 인증")
-        appendLog("2) START 버튼으로 서비스 시작")
-        appendLog("3) STOP 버튼으로 서비스 중지")
+        appendLog("2) Mock item 선택 후 APPLY MOCK ITEM(선택)")
+        appendLog("3) START 버튼으로 서비스 시작")
+        appendLog("4) STOP 버튼으로 서비스 중지")
     }
 
     override fun onStart() {
@@ -143,8 +178,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun authJupiter() {
-        // [Jupiter SDK 사용법 #1] 인증
-        // auth(accessKey, accessSecretKey)를 먼저 호출한다.
+        // [Jupiter SDK 2.0.14 사용법 #1] 서버 설정 후 인증
+        // 서버 설정은 TJJupiterAuth.setServerConfig(provider, region)에서 관리한다.
         if (accessKey.isBlank() || accessSecretKey.isBlank()) {
             appendLog("AUTH 키가 비어있습니다. local.properties의 AUTH_ACCESS_KEY / AUTH_SECRET_ACCESS_KEY를 확인하세요.")
             return
@@ -153,13 +188,14 @@ class MainActivity : AppCompatActivity() {
         appendLog("AUTH 요청...")
         isAuthed = false
         isInitialized = false
-        JupiterServiceManager.setAuthServer(ServerProvider.AWS.value, region)
-        JupiterServiceManager.auth(application, accessKey, accessSecretKey) { code, success ->
+        TJJupiterAuth.setServerConfig(ServerProvider.GCP.value, region)
+        TJJupiterAuth.auth(application, accessKey, accessSecretKey) { code, success ->
             runOnUiThread {
                 isAuthed = success
                 appendLog("AUTH 결과: success=$success, code=$code")
                 if (success) {
-                    appendLog("INIT 요청... provider=${ServerProvider.AWS.value}, region=$region, sectorId=$sectorId")
+                    appendLog("INIT 요청... provider=${ServerProvider.GCP.value}, region=$region, sectorId=$sectorId")
+                    jupiterService.setDebugOption(true)
                     jupiterService.initialize(
                         sectorId,
                         jupiterCallback
@@ -194,7 +230,13 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        appendLog("START 요청... mode=${userMode.value}")
+        appendLog(
+            if (isMockModeApplied) {
+                "START 요청... mode=${userMode.value}, mock=${selectedMockMode.name}"
+            } else {
+                "START 요청... mode=${userMode.value}, mock=OFF"
+            }
+        )
         jupiterService.startService(userMode, jupiterCallback)
     }
 
@@ -217,12 +259,13 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun toggleMockMode() {
-        // [Jupiter SDK 사용법 #4] Mock 데이터 모드 토글
-        // setMockingMode(true/false)로 mock 모드를 켜고 끈다.
-        isMockModeEnabled = !isMockModeEnabled
-        jupiterService.setMockingMode(isMockModeEnabled)
-        showToast("Mock mode: ${if (isMockModeEnabled) "ON" else "OFF"}")
+    private fun applyMockMode() {
+        // [Jupiter SDK 2.0.14 사용법 #4] Mock 데이터 item 적용
+        // 선택한 mock timeline을 로드한 뒤 START로 실행한다.
+        jupiterService.setMockMode(selectedMockMode)
+        isMockModeApplied = true
+        appendLog("Mock item 적용 완료: ${selectedMockMode.name}")
+        showToast("Mock item applied: ${selectedMockMode.name}")
     }
 
     private fun requestAllRequiredPermissions() {

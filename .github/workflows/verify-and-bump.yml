@@ -1,0 +1,262 @@
+name: Verify And Bump Jupiter SDK
+
+on:
+  repository_dispatch:
+    types: [sdk-released]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Target Jupiter SDK version (e.g. 2.0.18)"
+        required: true
+        type: string
+      providers:
+        description: "Comma-separated providers to verify (e.g. GCP or GCP,AWS)"
+        required: false
+        type: string
+        default: "GCP"
+      regions:
+        description: "Comma-separated regions to verify (e.g. KOREA,SAUDI)"
+        required: false
+        type: string
+        default: "KOREA,SAUDI"
+      sector_id:
+        description: "Sector ID used by initialize() during verification"
+        required: false
+        type: string
+        default: "20"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: verify-and-bump-${{ github.event.client_payload.version || inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  resolve-inputs:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.set.outputs.version }}
+      providers: ${{ steps.set.outputs.providers }}
+      regions: ${{ steps.set.outputs.regions }}
+      sector_id: ${{ steps.set.outputs.sector_id }}
+      matrix: ${{ steps.set.outputs.matrix }}
+    steps:
+      - name: Resolve inputs
+        id: set
+        shell: bash
+        run: |
+          VERSION="${{ github.event.client_payload.version || inputs.version }}"
+          PROVIDERS="${{ github.event.client_payload.providers || inputs.providers || 'GCP' }}"
+          REGIONS="${{ github.event.client_payload.regions || inputs.regions || 'KOREA,SAUDI' }}"
+          SECTOR_ID="${{ github.event.client_payload.sector_id || inputs.sector_id || '20' }}"
+
+          if [[ -z "$VERSION" ]]; then
+            echo "::error::version is required"
+            exit 1
+          fi
+          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Invalid semver: $VERSION"
+            exit 1
+          fi
+
+          # Build matrix JSON: [{"provider":"GCP","region":"KOREA"}, ...]
+          MATRIX=$(python3 - <<PY
+          import json, os
+          providers = [p.strip() for p in "$PROVIDERS".split(",") if p.strip()]
+          regions = [r.strip() for r in "$REGIONS".split(",") if r.strip()]
+          combos = [{"provider": p, "region": r} for p in providers for r in regions]
+          print(json.dumps({"include": combos}))
+          PY
+          )
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "providers=$PROVIDERS" >> "$GITHUB_OUTPUT"
+          echo "regions=$REGIONS" >> "$GITHUB_OUTPUT"
+          echo "sector_id=$SECTOR_ID" >> "$GITHUB_OUTPUT"
+          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+
+          echo "Resolved version=$VERSION providers=$PROVIDERS regions=$REGIONS sector_id=$SECTOR_ID"
+          echo "Matrix: $MATRIX"
+
+  verify:
+    needs: resolve-inputs
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.resolve-inputs.outputs.matrix) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Override JUPITER_SDK_VERSION to release tag
+        shell: bash
+        run: |
+          VERSION="${{ needs.resolve-inputs.outputs.version }}"
+          sed -i "s/^JUPITER_SDK_VERSION=.*/JUPITER_SDK_VERSION=${VERSION}/" gradle.properties
+          grep '^JUPITER_SDK_VERSION=' gradle.properties
+
+      - name: Run androidTest on emulator (${{ matrix.provider }} / ${{ matrix.region }})
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          ORG_GRADLE_PROJECT_AUTH_ACCESS_KEY: ${{ secrets.AUTH_ACCESS_KEY }}
+          ORG_GRADLE_PROJECT_AUTH_SECRET_ACCESS_KEY: ${{ secrets.AUTH_SECRET_ACCESS_KEY }}
+        with:
+          api-level: 30
+          arch: x86_64
+          target: default
+          force-avd-creation: false
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: |
+            ./gradlew :app:connectedDebugAndroidTest \
+              -Pandroid.testInstrumentationRunnerArguments.class=com.tjlabs.tjjupiterdemo.JupiterAuthInitTest \
+              -Pandroid.testInstrumentationRunnerArguments.provider=${{ matrix.provider }} \
+              -Pandroid.testInstrumentationRunnerArguments.region=${{ matrix.region }} \
+              -Pandroid.testInstrumentationRunnerArguments.sectorId=${{ needs.resolve-inputs.outputs.sector_id }} \
+              --stacktrace
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: androidTest-report-${{ matrix.provider }}-${{ matrix.region }}
+          path: app/build/reports/androidTests/connected/**
+          if-no-files-found: ignore
+
+  bump:
+    needs: [resolve-inputs, verify]
+    runs-on: ubuntu-latest
+    outputs:
+      pr_url: ${{ steps.pr.outputs.pr_url }}
+      branch: ${{ steps.pr.outputs.branch }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Configure git
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Create bump branch
+        id: branch
+        shell: bash
+        run: |
+          VERSION="${{ needs.resolve-inputs.outputs.version }}"
+          BRANCH="chore/bump-jupiter-${VERSION}"
+          if git ls-remote --exit-code origin "refs/heads/${BRANCH}" >/dev/null 2>&1; then
+            echo "::error::Branch ${BRANCH} already exists on origin"
+            exit 1
+          fi
+          git checkout -b "${BRANCH}"
+          echo "branch=${BRANCH}" >> "$GITHUB_OUTPUT"
+
+      - name: Bump JUPITER_SDK_VERSION in gradle.properties
+        shell: bash
+        run: |
+          VERSION="${{ needs.resolve-inputs.outputs.version }}"
+          sed -i "s/^JUPITER_SDK_VERSION=.*/JUPITER_SDK_VERSION=${VERSION}/" gradle.properties
+          grep '^JUPITER_SDK_VERSION=' gradle.properties
+
+      - name: Sync README via Gradle task
+        run: ./gradlew :app:syncReadmeJupiterVersion
+
+      - name: Commit & push
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          VERSION="${{ needs.resolve-inputs.outputs.version }}"
+          BRANCH="${{ steps.branch.outputs.branch }}"
+          git add gradle.properties README.md
+          if git diff --cached --quiet; then
+            echo "::warning::No changes to commit (already on ${VERSION}?)"
+            echo "pr_url=" >> "$GITHUB_OUTPUT"
+            echo "branch=${BRANCH}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git commit -m "chore: bump Jupiter SDK to ${VERSION}"
+          git push -u origin "${BRANCH}"
+
+          PR_URL=$(gh pr create \
+            --draft \
+            --base main \
+            --head "${BRANCH}" \
+            --title "chore: bump Jupiter SDK to ${VERSION}" \
+            --body "Auto-generated by Verify And Bump Jupiter SDK. Verified providers=${{ needs.resolve-inputs.outputs.providers }}, regions=${{ needs.resolve-inputs.outputs.regions }}, sectorId=${{ needs.resolve-inputs.outputs.sector_id }}.")
+          echo "pr_url=${PR_URL}" >> "$GITHUB_OUTPUT"
+          echo "branch=${BRANCH}" >> "$GITHUB_OUTPUT"
+
+  notify:
+    needs: [resolve-inputs, verify, bump]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify Slack (Success)
+        if: ${{ needs.verify.result == 'success' && needs.bump.result == 'success' }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        shell: bash
+        run: |
+          if [[ -z "${SLACK_WEBHOOK_URL}" ]]; then
+            echo "SLACK_WEBHOOK_URL is not set. Skip Slack notification."
+            exit 0
+          fi
+          VERSION="${{ needs.resolve-inputs.outputs.version }}"
+          PROVIDERS="${{ needs.resolve-inputs.outputs.providers }}"
+          REGIONS="${{ needs.resolve-inputs.outputs.regions }}"
+          PR_URL="${{ needs.bump.outputs.pr_url }}"
+          RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          payload=$(cat <<EOF
+          {
+            "text": "✅ Jupiter demo 검증 & README bump 완료\n- repo: ${{ github.repository }}\n- version: ${VERSION}\n- verified: providers=${PROVIDERS}, regions=${REGIONS}\n- PR: ${PR_URL}\n- run: ${RUN_URL}"
+          }
+          EOF
+          )
+          curl -X POST -H 'Content-type: application/json' --data "$payload" "$SLACK_WEBHOOK_URL"
+
+      - name: Notify Slack (Failure)
+        if: ${{ needs.verify.result != 'success' || needs.bump.result == 'failure' }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        shell: bash
+        run: |
+          if [[ -z "${SLACK_WEBHOOK_URL}" ]]; then
+            echo "SLACK_WEBHOOK_URL is not set. Skip Slack notification."
+            exit 0
+          fi
+          VERSION="${{ needs.resolve-inputs.outputs.version }}"
+          PROVIDERS="${{ needs.resolve-inputs.outputs.providers }}"
+          REGIONS="${{ needs.resolve-inputs.outputs.regions }}"
+          RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          payload=$(cat <<EOF
+          {
+            "text": "❌ Jupiter demo 검증 실패\n- repo: ${{ github.repository }}\n- version: ${VERSION}\n- target: providers=${PROVIDERS}, regions=${REGIONS}\n- verify=${{ needs.verify.result }}, bump=${{ needs.bump.result }}\n- run: ${RUN_URL}"
+          }
+          EOF
+          )
+          curl -X POST -H 'Content-type: application/json' --data "$payload" "$SLACK_WEBHOOK_URL"
