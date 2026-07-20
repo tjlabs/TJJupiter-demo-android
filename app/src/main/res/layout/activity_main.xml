@@ -6,10 +6,35 @@
     android:padding="16dp"
     android:background="@android:color/white">
 
+    <!-- Test server (DEV) toggle. Save / Upload 은 이 스위치가 켜져있을 때만 활성화. -->
+    <androidx.appcompat.widget.SwitchCompat
+        android:id="@+id/switchDevServer"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Use Test Server (.jupiter.tjlabs.dev)"
+        android:textColor="#222222" />
+
+    <androidx.appcompat.widget.SwitchCompat
+        android:id="@+id/switchSaveData"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:text="Save collected data (DEV only)"
+        android:textColor="#222222" />
+
+    <androidx.appcompat.widget.SwitchCompat
+        android:id="@+id/switchUploadData"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:text="Upload telemetry (DEV only)"
+        android:textColor="#222222" />
+
     <Button
         android:id="@+id/btnAuth"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
         android:text="AUTH" />
 
     <Button
