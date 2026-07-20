@@ -15,6 +15,7 @@ import android.widget.TextView
 import android.widget.Toast
 import android.view.View
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.SwitchCompat
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.tjlabs.tjlabsjupiter_sdk_android.InOutState
@@ -44,6 +45,16 @@ class MainActivity : AppCompatActivity() {
     private var selectedMockMode = JupiterMockMode.VEHICLE_INDOOR_OUTDOOR
     private var isMockModeApplied = false
     private var didInitialPermissionRequest = false
+
+    // 서버 · 데이터 옵션 (기본 PROD, save/upload 모두 OFF).
+    // save/upload 는 useDevServer=true 인 경우에만 켤 수 있다 — PROD 사용자에게 개발용
+    // 진단 데이터가 저장 · 업로드되지 않도록 방지.
+    private var useDevServer = false
+    private var saveDataEnabled = false
+    private var uploadDataEnabled = false
+    private lateinit var switchDevServer: SwitchCompat
+    private lateinit var switchSaveData: SwitchCompat
+    private lateinit var switchUploadData: SwitchCompat
 
     // 샘플 기본값: 송도 컨벤시아 섹터(20), 차량 모드
     private val sectorId = 20
@@ -139,6 +150,52 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btnStop).setOnClickListener { stopJupiter() }
         findViewById<Button>(R.id.btnMockToggle).setOnClickListener { applyMockMode() }
 
+        // 서버 · 데이터 옵션 스위치
+        switchDevServer = findViewById(R.id.switchDevServer)
+        switchSaveData = findViewById(R.id.switchSaveData)
+        switchUploadData = findViewById(R.id.switchUploadData)
+
+        switchDevServer.setOnCheckedChangeListener { _, checked ->
+            useDevServer = checked
+            appendLog(
+                if (checked) "서버 설정: DEV (.jupiter.tjlabs.dev) — 다음 AUTH 부터 적용"
+                else "서버 설정: PROD (.jupiter.tjlabscorp.com) — 다음 AUTH 부터 적용"
+            )
+            // PROD 로 되돌리면 save/upload 도 자동 OFF (PROD 에서 켜져있으면 안 되므로).
+            if (!checked) {
+                if (saveDataEnabled) {
+                    switchSaveData.isChecked = false
+                }
+                if (uploadDataEnabled) {
+                    switchUploadData.isChecked = false
+                }
+            }
+        }
+
+        switchSaveData.setOnCheckedChangeListener { _, checked ->
+            if (checked && !useDevServer) {
+                showToast("Save 는 Test Server (DEV) 사용 시에만 가능합니다.")
+                appendLog("Save toggle 거부: DEV 서버 미선택 상태")
+                switchSaveData.isChecked = false
+                return@setOnCheckedChangeListener
+            }
+            saveDataEnabled = checked
+            jupiterService.setSaveDataFlag(checked)
+            appendLog("Save data: ${if (checked) "ON" else "OFF"}")
+        }
+
+        switchUploadData.setOnCheckedChangeListener { _, checked ->
+            if (checked && !useDevServer) {
+                showToast("Upload 는 Test Server (DEV) 사용 시에만 가능합니다.")
+                appendLog("Upload toggle 거부: DEV 서버 미선택 상태")
+                switchUploadData.isChecked = false
+                return@setOnCheckedChangeListener
+            }
+            uploadDataEnabled = checked
+            jupiterService.setTelemetryUploadEnabled(checked)
+            appendLog("Upload telemetry: ${if (checked) "ON" else "OFF"}")
+        }
+
         val mockModes = JupiterMockMode.values().toList()
         val mockLabels = mockModes.map { it.name }
         spinnerMockMode.adapter = ArrayAdapter(
@@ -162,6 +219,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         appendLog("앱 시작")
+        appendLog("(선택) Test Server 스위치 → DEV 서버 사용. Save/Upload 는 DEV 일 때만 활성.")
         appendLog("1) AUTH 버튼으로 인증")
         appendLog("2) Mock item 선택 후 APPLY MOCK ITEM(선택)")
         appendLog("3) START 버튼으로 서비스 시작")
@@ -185,17 +243,26 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        appendLog("AUTH 요청...")
+        val envLabel = if (useDevServer) "DEV (.jupiter.tjlabs.dev)" else "PROD (.jupiter.tjlabscorp.com)"
+        appendLog("AUTH 요청... env=$envLabel")
         isAuthed = false
         isInitialized = false
-        TJJupiterAuth.setServerConfig(ServerProvider.GCP.value, region)
+        if (useDevServer) {
+            // ⚠ 내부 QA · 개발 서버 (SLA 없음). release 빌드에서 호출 시 SDK 가 경고 로그 출력.
+            TJJupiterAuth.setServerConfigForDevelopment(this, ServerProvider.GCP.value, region)
+        } else {
+            TJJupiterAuth.setServerConfig(ServerProvider.GCP.value, region)
+        }
         TJJupiterAuth.auth(application, accessKey, accessSecretKey) { code, success ->
             runOnUiThread {
                 isAuthed = success
                 appendLog("AUTH 결과: success=$success, code=$code")
                 if (success) {
-                    appendLog("INIT 요청... provider=${ServerProvider.GCP.value}, region=$region, sectorId=$sectorId")
+                    appendLog("INIT 요청... provider=${ServerProvider.GCP.value}, region=$region, sectorId=$sectorId, env=$envLabel")
                     jupiterService.setDebugOption(true)
+                    // Auth 성공 후 현재 스위치 상태를 SDK 에 반영 (INIT 전에 확정).
+                    jupiterService.setSaveDataFlag(saveDataEnabled)
+                    jupiterService.setTelemetryUploadEnabled(uploadDataEnabled)
                     jupiterService.initialize(
                         sectorId,
                         jupiterCallback

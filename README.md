@@ -4,7 +4,7 @@
 
 TJJupiter-demo-android is a minimal Android sample app for integrating **TJLabs Jupiter SDK**.
 
-This demo app uses **TJLabs Jupiter SDK 2.0.17**.
+This demo app uses **TJLabs Jupiter SDK 2.0.20**.
 
 The app demonstrates a simple Jupiter service lifecycle with:
 - Authentication (`AUTH`)
@@ -64,7 +64,7 @@ dependencyResolutionManagement {
 Add dependency:
 
 ```kotlin
-implementation("com.github.tjlabs:TJLabsJupiter-sdk-android:2.0.17")
+implementation("com.github.tjlabs:TJLabsJupiter-sdk-android:2.0.20")
 ```
 
 Set credentials in `local.properties`:
@@ -87,7 +87,8 @@ val manager = JupiterServiceManager(application, "sample_user_android")
 
 In SDK 2.0.17, server configuration and authentication are handled by `TJJupiterAuth`.
 
-Default server config is `GCP / KOREA`, but this demo sets it explicitly before auth:
+Default server config is `GCP / KOREA` with the **PROD** environment (`.jupiter.tjlabscorp.com`).
+This demo sets it explicitly before auth:
 
 ```kotlin
 TJJupiterAuth.setServerConfig(
@@ -108,6 +109,45 @@ Input:
 
 Output:
 - callback `(code: Int, success: Boolean)`
+
+#### 2.1 (Optional) Development / QA — Point to DEV server
+
+Since SDK 2.0.20, the SDK exposes an explicit **DEV opt-in** for internal testing against
+`.jupiter.tjlabs.dev`. Use this only in debuggable builds; production apps must keep the
+default PROD configuration.
+
+```kotlin
+// Replace the setServerConfig(...) call above with this one.
+TJJupiterAuth.setServerConfigForDevelopment(
+    context,                    // Activity or Application context
+    ServerProvider.GCP.value,
+    JupiterRegion.KOREA.value
+)
+
+TJJupiterAuth.auth(application, accessKey, accessSecretKey) { code, success ->
+    // handle auth result
+}
+```
+
+Input:
+- `context: Context`  (needed to detect release-build misuse)
+- `provider: String`
+- `region: String`
+
+Output:
+- No return value. Server URL and auth env are internally switched to DEV.
+
+Notes:
+- DEV server (`.jupiter.tjlabs.dev`) has **no SLA** and may serve incorrect or partial data.
+- Calling this from a **non-debuggable (release) build** logs a warning
+  (`⚠ setServerConfigForDevelopment called by NON-DEBUGGABLE (release) app`) but does not
+  block the call. Release builds should always use `setServerConfig(...)`.
+- The choice persists for the process lifetime. Call `setServerConfig(...)` again to switch
+  back to PROD without restarting the app.
+- All downstream SDKs (Auth, Resource, Navi) receive the same env selection automatically.
+
+The rest of the lifecycle (`initialize`, `startService`, ...) is identical regardless of
+which of the two config calls you used.
 
 ### 3. Initialize Service
 
@@ -229,7 +269,9 @@ val callback = object : JupiterServiceManager.JupiterServiceManagerDelegate {
 
 Required order:
 
-1. `TJJupiterAuth.setServerConfig(...)` (optional when using default `GCP / KOREA`)
+1. Server config — pick **one** :
+   - `TJJupiterAuth.setServerConfig(...)` (PROD, optional when using default `GCP / KOREA`)
+   - `TJJupiterAuth.setServerConfigForDevelopment(context, ...)` (DEV, internal QA only)
 2. `TJJupiterAuth.auth(...)`
 3. `manager.initialize(...)`
 4. Optional: `manager.setMockMode(...)`
@@ -248,3 +290,13 @@ If `startService(...)` is called before auth and initialize success, SDK can ret
 - Telemetry upload uses the updated collections presign flow inside SDK.
 - Navigation route callbacks include `routeId`, `totalDistance`, and route points.
 - SDK includes LSE(Single Epoch) based correction improvements for entering/searching stability.
+
+## 2.0.20 Notes
+
+- New : `TJJupiterAuth.setServerConfigForDevelopment(context, provider, region)` opt-in
+  DEV server switch. See **2.1 (Optional) Development / QA** above.
+- Default remains PROD (`.jupiter.tjlabscorp.com`); any consumer that never calls
+  `setServerConfig` still lands on PROD.
+- PROD URL updated from the previous placeholder to `.jupiter.tjlabscorp.com`. Non-Korea
+  regions (e.g. Saudi `me-central2`) are now routed automatically from the region prefix.
+- Requires Auth SDK ≥ 1.0.28 and Resource SDK ≥ 1.1.8, both pulled transitively.
