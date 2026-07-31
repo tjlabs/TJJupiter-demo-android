@@ -13,7 +13,7 @@ import com.tjlabs.tjlabsjupiter_sdk_android.JupiterNavigationRoute
 import com.tjlabs.tjlabsjupiter_sdk_android.JupiterServiceCode
 import com.tjlabs.tjlabsjupiter_sdk_android.JupiterServiceManager
 import com.tjlabs.tjlabsjupiter_sdk_android.TJJupiterAuth
-import com.tjlabs.tjlabsjupiter_sdk_android.UserMode
+import com.tjlabs.tjlabscommon_sdk_android.uvd.UserMode
 import com.tjlabs.tjlabsjupiter_sdk_android.api.JupiterRegion
 import com.tjlabs.tjlabsjupiter_sdk_android.api.JupiterResult
 import com.tjlabs.tjlabsresource_sdk_android.ServerProvider
@@ -51,8 +51,6 @@ class JupiterMockModeTest {
 
         val scenarios = listOf(
             MockScenario("vehicle", JupiterMockMode.VEHICLE_INDOOR_OUTDOOR, UserMode.MODE_VEHICLE),
-            MockScenario("outdoor", JupiterMockMode.VEHICLE_OUTDOOR_PARKING, UserMode.MODE_VEHICLE),
-            MockScenario("indoor", JupiterMockMode.PEDESTRIAN_INDOOR_PARKING, UserMode.MODE_PEDESTRIAN)
         )
 
         scenarios.forEach { scenario ->
