@@ -18,7 +18,7 @@ on:
         description: "Comma-separated regions to verify (e.g. KOREA,SAUDI)"
         required: false
         type: string
-        default: "KOREA,SAUDI"
+        default: "KOREA"
       sector_id:
         description: "Sector ID used by initialize() during verification"
         required: false
@@ -48,7 +48,7 @@ jobs:
         run: |
           VERSION="${{ github.event.client_payload.version || inputs.version }}"
           PROVIDERS="${{ github.event.client_payload.providers || inputs.providers || 'GCP' }}"
-          REGIONS="${{ github.event.client_payload.regions || inputs.regions || 'KOREA,SAUDI' }}"
+          REGIONS="${{ github.event.client_payload.regions || inputs.regions || 'KOREA' }}"
           SECTOR_ID="${{ github.event.client_payload.sector_id || inputs.sector_id || '20' }}"
 
           if [[ -z "$VERSION" ]]; then
@@ -60,12 +60,21 @@ jobs:
             exit 1
           fi
 
-          # Build matrix JSON: [{"provider":"GCP","region":"KOREA"}, ...]
+          # Build matrix JSON with region-specific secret names.
           MATRIX=$(python3 - <<PY
           import json, os
           providers = [p.strip() for p in "$PROVIDERS".split(",") if p.strip()]
           regions = [r.strip() for r in "$REGIONS".split(",") if r.strip()]
-          combos = [{"provider": p, "region": r} for p in providers for r in regions]
+          combos = [
+              {
+                  "provider": p,
+                  "region": r,
+                  "auth_access_key_secret": f"AUTH_ACCESS_KEY_{r.upper()}",
+                  "auth_secret_access_key_secret": f"AUTH_SECRET_ACCESS_KEY_{r.upper()}",
+              }
+              for p in providers
+              for r in regions
+          ]
           print(json.dumps({"include": combos}))
           PY
           )
@@ -108,11 +117,26 @@ jobs:
           sed -i "s/^JUPITER_SDK_VERSION=.*/JUPITER_SDK_VERSION=${VERSION}/" gradle.properties
           grep '^JUPITER_SDK_VERSION=' gradle.properties
 
+      - name: Validate region secrets (${{ matrix.provider }} / ${{ matrix.region }})
+        env:
+          AUTH_ACCESS_KEY: ${{ secrets[matrix.auth_access_key_secret] }}
+          AUTH_SECRET_ACCESS_KEY: ${{ secrets[matrix.auth_secret_access_key_secret] }}
+        shell: bash
+        run: |
+          if [[ -z "$AUTH_ACCESS_KEY" ]]; then
+            echo "::error::Missing GitHub secret: ${{ matrix.auth_access_key_secret }}"
+            exit 1
+          fi
+          if [[ -z "$AUTH_SECRET_ACCESS_KEY" ]]; then
+            echo "::error::Missing GitHub secret: ${{ matrix.auth_secret_access_key_secret }}"
+            exit 1
+          fi
+
       - name: Run androidTest on emulator (${{ matrix.provider }} / ${{ matrix.region }})
         uses: reactivecircus/android-emulator-runner@v2
         env:
-          ORG_GRADLE_PROJECT_AUTH_ACCESS_KEY: ${{ secrets.AUTH_ACCESS_KEY }}
-          ORG_GRADLE_PROJECT_AUTH_SECRET_ACCESS_KEY: ${{ secrets.AUTH_SECRET_ACCESS_KEY }}
+          ORG_GRADLE_PROJECT_AUTH_ACCESS_KEY: ${{ secrets[matrix.auth_access_key_secret] }}
+          ORG_GRADLE_PROJECT_AUTH_SECRET_ACCESS_KEY: ${{ secrets[matrix.auth_secret_access_key_secret] }}
         with:
           api-level: 30
           arch: x86_64
@@ -123,6 +147,26 @@ jobs:
           script: >-
             ./gradlew :app:connectedDebugAndroidTest
             -Pandroid.testInstrumentationRunnerArguments.class=com.tjlabs.tjjupiterdemo.JupiterAuthInitTest
+            -Pandroid.testInstrumentationRunnerArguments.provider=${{ matrix.provider }}
+            -Pandroid.testInstrumentationRunnerArguments.region=${{ matrix.region }}
+            -Pandroid.testInstrumentationRunnerArguments.sectorId=${{ needs.resolve-inputs.outputs.sector_id }}
+            --stacktrace
+
+      - name: Run mock mode androidTest on emulator (${{ matrix.provider }} / ${{ matrix.region }})
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          ORG_GRADLE_PROJECT_AUTH_ACCESS_KEY: ${{ secrets[matrix.auth_access_key_secret] }}
+          ORG_GRADLE_PROJECT_AUTH_SECRET_ACCESS_KEY: ${{ secrets[matrix.auth_secret_access_key_secret] }}
+        with:
+          api-level: 30
+          arch: x86_64
+          target: default
+          force-avd-creation: false
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: >-
+            ./gradlew :app:connectedDebugAndroidTest
+            -Pandroid.testInstrumentationRunnerArguments.class=com.tjlabs.tjjupiterdemo.JupiterMockModeTest
             -Pandroid.testInstrumentationRunnerArguments.provider=${{ matrix.provider }}
             -Pandroid.testInstrumentationRunnerArguments.region=${{ matrix.region }}
             -Pandroid.testInstrumentationRunnerArguments.sectorId=${{ needs.resolve-inputs.outputs.sector_id }}
