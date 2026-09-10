@@ -57,9 +57,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var switchUploadData: SwitchCompat
 
     // 샘플 기본값: 송도 컨벤시아 섹터(20), 차량 모드
-    private val sectorId = 20
+    private val sectorId = 111
     private val userMode = UserMode.MODE_VEHICLE
-    private val region = JupiterRegion.KOREA.value
+    private val region = JupiterRegion.SAUDI.value
 
     // 샘플 앱에서는 userId를 고정으로 사용한다.
     // 실제 서비스에서는 로그인 사용자 식별자(공백 없는 고유값)를 사용하면 된다.
@@ -146,6 +146,7 @@ class MainActivity : AppCompatActivity() {
         val spinnerMockMode = findViewById<Spinner>(R.id.spinnerMockMode)
 
         findViewById<Button>(R.id.btnAuth).setOnClickListener { authJupiter() }
+        findViewById<Button>(R.id.btnInit).setOnClickListener { initJupiter() }
         findViewById<Button>(R.id.btnStart).setOnClickListener { startJupiter() }
         findViewById<Button>(R.id.btnStop).setOnClickListener { stopJupiter() }
         findViewById<Button>(R.id.btnMockToggle).setOnClickListener { applyMockMode() }
@@ -221,9 +222,10 @@ class MainActivity : AppCompatActivity() {
         appendLog("앱 시작")
         appendLog("(선택) Test Server 스위치 → DEV 서버 사용. Save/Upload 는 DEV 일 때만 활성.")
         appendLog("1) AUTH 버튼으로 인증")
-        appendLog("2) Mock item 선택 후 APPLY MOCK ITEM(선택)")
-        appendLog("3) START 버튼으로 서비스 시작")
-        appendLog("4) STOP 버튼으로 서비스 중지")
+        appendLog("2) INIT 버튼으로 초기화")
+        appendLog("3) Mock item 선택 후 APPLY MOCK ITEM(선택)")
+        appendLog("4) START 버튼으로 서비스 시작")
+        appendLog("5) STOP 버튼으로 서비스 중지")
     }
 
     override fun onStart() {
@@ -258,18 +260,34 @@ class MainActivity : AppCompatActivity() {
                 isAuthed = success
                 appendLog("AUTH 결과: success=$success, code=$code")
                 if (success) {
-                    appendLog("INIT 요청... provider=${ServerProvider.GCP.value}, region=$region, sectorId=$sectorId, env=$envLabel")
-                    jupiterService.setDebugOption(true)
-                    // Auth 성공 후 현재 스위치 상태를 SDK 에 반영 (INIT 전에 확정).
-                    jupiterService.setSaveDataFlag(saveDataEnabled)
-                    jupiterService.setTelemetryUploadEnabled(uploadDataEnabled)
-                    jupiterService.initialize(
-                        sectorId,
-                        jupiterCallback
-                    )
+                    appendLog("AUTH 성공 — INIT 버튼을 눌러 초기화하세요.")
                 }
             }
         }
+    }
+
+    private fun initJupiter() {
+        // [Jupiter SDK 2.0.14 사용법 #2] 초기화
+        // AUTH 성공 후 sectorId 로 서비스를 초기화한다.
+        if (!isAuthed) {
+            appendLog("INIT 전에 AUTH 를 먼저 수행하세요.")
+            return
+        }
+        if (isInitialized) {
+            appendLog("이미 INIT 완료 상태입니다.")
+            return
+        }
+
+        val envLabel = if (useDevServer) "DEV (.jupiter.tjlabs.dev)" else "PROD (.jupiter.tjlabscorp.com)"
+        appendLog("INIT 요청... provider=${ServerProvider.GCP.value}, region=$region, sectorId=$sectorId, env=$envLabel")
+        jupiterService.setDebugOption(true)
+        // INIT 전에 현재 스위치 상태를 SDK 에 반영.
+        jupiterService.setSaveDataFlag(saveDataEnabled)
+        jupiterService.setTelemetryUploadEnabled(uploadDataEnabled)
+        jupiterService.initialize(
+            sectorId,
+            jupiterCallback
+        )
     }
 
     private fun startJupiter() {
@@ -277,16 +295,13 @@ class MainActivity : AppCompatActivity() {
         // 2.0.5 기준: startService(mode, callback) 호출로 측위를 시작한다.
         if (isServiceRunning) {
             appendLog("이미 Jupiter 서비스가 실행 중입니다.")
-            return
         }
 
         if (!isAuthed) {
             appendLog("START 전에 AUTH를 먼저 수행하세요.")
-            return
         }
         if (!isInitialized) {
             appendLog("START 전에 INIT 성공이 필요합니다. AUTH 후 INIT 결과를 확인하세요.")
-            return
         }
 
         if (!hasRequiredRuntimePermissions()) {
@@ -294,7 +309,6 @@ class MainActivity : AppCompatActivity() {
             appendLog("필수 권한이 부족해 START를 중단했습니다: $summary")
             showToast("권한 필요: $summary")
             requestAllRequiredPermissions()
-            return
         }
 
         appendLog(
@@ -312,7 +326,6 @@ class MainActivity : AppCompatActivity() {
         // stopService()로 서비스를 중지한다.
         if (!isServiceRunning) {
             appendLog("현재 실행 중인 Jupiter 서비스가 없습니다.")
-            return
         }
 
         appendLog("STOP 요청...")

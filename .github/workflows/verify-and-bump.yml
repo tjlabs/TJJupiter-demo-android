@@ -18,12 +18,17 @@ on:
         description: "Comma-separated regions to verify (e.g. KOREA,SAUDI)"
         required: false
         type: string
-        default: "KOREA"
+        default: "KOREA,SAUDI"
       sector_id:
-        description: "Sector ID used by initialize() during verification"
+        description: "Fallback sector_id used when a region has no entry in sector_ids"
         required: false
         type: string
         default: "20"
+      sector_ids:
+        description: 'Per-region sector_id JSON map (e.g. {"KOREA":"20","SAUDI":"112"}). Overrides sector_id per region.'
+        required: false
+        type: string
+        default: '{"KOREA":"20","SAUDI":"112"}'
 
 permissions:
   contents: write
@@ -39,17 +44,26 @@ jobs:
       version: ${{ steps.set.outputs.version }}
       providers: ${{ steps.set.outputs.providers }}
       regions: ${{ steps.set.outputs.regions }}
-      sector_id: ${{ steps.set.outputs.sector_id }}
+      sector_ids: ${{ steps.set.outputs.sector_ids }}
       matrix: ${{ steps.set.outputs.matrix }}
     steps:
       - name: Resolve inputs
         id: set
         shell: bash
+        # GitHub Actions expression 결과를 env 로 넘겨야 JSON 내부의 큰따옴표가 bash 파싱에 깨지지 않는다.
+        env:
+          VERSION_IN: ${{ github.event.client_payload.version || inputs.version }}
+          PROVIDERS_IN: ${{ github.event.client_payload.providers || inputs.providers || 'GCP' }}
+          REGIONS_IN: ${{ github.event.client_payload.regions || inputs.regions || 'KOREA,SAUDI' }}
+          SECTOR_ID_FALLBACK_IN: ${{ github.event.client_payload.sector_id || inputs.sector_id || '20' }}
+          SECTOR_IDS_JSON_IN: ${{ github.event.client_payload.sector_ids || inputs.sector_ids || '{"KOREA":"20","SAUDI":"112"}' }}
         run: |
-          VERSION="${{ github.event.client_payload.version || inputs.version }}"
-          PROVIDERS="${{ github.event.client_payload.providers || inputs.providers || 'GCP' }}"
-          REGIONS="${{ github.event.client_payload.regions || inputs.regions || 'KOREA' }}"
-          SECTOR_ID="${{ github.event.client_payload.sector_id || inputs.sector_id || '20' }}"
+          VERSION="$VERSION_IN"
+          PROVIDERS="$PROVIDERS_IN"
+          REGIONS="$REGIONS_IN"
+          SECTOR_ID_FALLBACK="$SECTOR_ID_FALLBACK_IN"
+          # Per-region sector_id JSON map. Falls back to SECTOR_ID_FALLBACK if a region has no entry.
+          SECTOR_IDS_JSON="$SECTOR_IDS_JSON_IN"
 
           if [[ -z "$VERSION" ]]; then
             echo "::error::version is required"
@@ -60,15 +74,23 @@ jobs:
             exit 1
           fi
 
-          # Build matrix JSON with region-specific secret names.
+          # Build matrix JSON with region-specific secret names and per-region sector_id.
           MATRIX=$(python3 - <<PY
           import json, os
           providers = [p.strip() for p in "$PROVIDERS".split(",") if p.strip()]
           regions = [r.strip() for r in "$REGIONS".split(",") if r.strip()]
+          fallback_sector = "$SECTOR_ID_FALLBACK"
+          try:
+              sector_map = json.loads(r'''$SECTOR_IDS_JSON''')
+              if not isinstance(sector_map, dict):
+                  raise ValueError("sector_ids must be a JSON object")
+          except Exception as e:
+              raise SystemExit(f"::error::Invalid sector_ids JSON: {e}")
           combos = [
               {
                   "provider": p,
                   "region": r,
+                  "sector_id": str(sector_map.get(r.upper(), fallback_sector)),
                   "auth_access_key_secret": f"AUTH_ACCESS_KEY_{r.upper()}",
                   "auth_secret_access_key_secret": f"AUTH_SECRET_ACCESS_KEY_{r.upper()}",
               }
@@ -82,10 +104,10 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "providers=$PROVIDERS" >> "$GITHUB_OUTPUT"
           echo "regions=$REGIONS" >> "$GITHUB_OUTPUT"
-          echo "sector_id=$SECTOR_ID" >> "$GITHUB_OUTPUT"
+          echo "sector_ids=$SECTOR_IDS_JSON" >> "$GITHUB_OUTPUT"
           echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
 
-          echo "Resolved version=$VERSION providers=$PROVIDERS regions=$REGIONS sector_id=$SECTOR_ID"
+          echo "Resolved version=$VERSION providers=$PROVIDERS regions=$REGIONS sector_ids=$SECTOR_IDS_JSON"
           echo "Matrix: $MATRIX"
 
   verify:
@@ -149,7 +171,7 @@ jobs:
             -Pandroid.testInstrumentationRunnerArguments.class=com.tjlabs.tjjupiterdemo.JupiterAuthInitTest
             -Pandroid.testInstrumentationRunnerArguments.provider=${{ matrix.provider }}
             -Pandroid.testInstrumentationRunnerArguments.region=${{ matrix.region }}
-            -Pandroid.testInstrumentationRunnerArguments.sectorId=${{ needs.resolve-inputs.outputs.sector_id }}
+            -Pandroid.testInstrumentationRunnerArguments.sectorId=${{ matrix.sector_id }}
             --stacktrace
 
       - name: Run mock mode androidTest on emulator (${{ matrix.provider }} / ${{ matrix.region }})
@@ -169,14 +191,14 @@ jobs:
             -Pandroid.testInstrumentationRunnerArguments.class=com.tjlabs.tjjupiterdemo.JupiterMockModeTest
             -Pandroid.testInstrumentationRunnerArguments.provider=${{ matrix.provider }}
             -Pandroid.testInstrumentationRunnerArguments.region=${{ matrix.region }}
-            -Pandroid.testInstrumentationRunnerArguments.sectorId=${{ needs.resolve-inputs.outputs.sector_id }}
+            -Pandroid.testInstrumentationRunnerArguments.sectorId=${{ matrix.sector_id }}
             --stacktrace
 
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: androidTest-report-${{ matrix.provider }}-${{ matrix.region }}
+          name: androidTest-report-${{ matrix.provider }}-${{ matrix.region }}-sector${{ matrix.sector_id }}
           path: app/build/reports/androidTests/connected/**
           if-no-files-found: ignore
 
@@ -260,11 +282,12 @@ jobs:
           VERSION="${{ needs.resolve-inputs.outputs.version }}"
           PROVIDERS="${{ needs.resolve-inputs.outputs.providers }}"
           REGIONS="${{ needs.resolve-inputs.outputs.regions }}"
+          SECTOR_IDS="${{ needs.resolve-inputs.outputs.sector_ids }}"
           BRANCH="${{ needs.bump.outputs.branch }}"
           RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           payload=$(cat <<EOF
           {
-            "text": "✅ Jupiter demo 검증 & README bump 완료\n- repo: ${{ github.repository }}\n- version: ${VERSION}\n- verified: providers=${PROVIDERS}, regions=${REGIONS}\n- branch: ${BRANCH}\n- run: ${RUN_URL}"
+            "text": "✅ Jupiter demo 검증 & README bump 완료\n- repo: ${{ github.repository }}\n- version: ${VERSION}\n- verified: providers=${PROVIDERS}, regions=${REGIONS}, sector_ids=${SECTOR_IDS}\n- branch: ${BRANCH}\n- run: ${RUN_URL}"
           }
           EOF
           )
@@ -283,10 +306,11 @@ jobs:
           VERSION="${{ needs.resolve-inputs.outputs.version }}"
           PROVIDERS="${{ needs.resolve-inputs.outputs.providers }}"
           REGIONS="${{ needs.resolve-inputs.outputs.regions }}"
+          SECTOR_IDS="${{ needs.resolve-inputs.outputs.sector_ids }}"
           RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           payload=$(cat <<EOF
           {
-            "text": "❌ Jupiter demo 검증 실패\n- repo: ${{ github.repository }}\n- version: ${VERSION}\n- target: providers=${PROVIDERS}, regions=${REGIONS}\n- verify=${{ needs.verify.result }}, bump=${{ needs.bump.result }}\n- run: ${RUN_URL}"
+            "text": "❌ Jupiter demo 검증 실패\n- repo: ${{ github.repository }}\n- version: ${VERSION}\n- target: providers=${PROVIDERS}, regions=${REGIONS}, sector_ids=${SECTOR_IDS}\n- verify=${{ needs.verify.result }}, bump=${{ needs.bump.result }}\n- run: ${RUN_URL}"
           }
           EOF
           )
