@@ -133,8 +133,10 @@ class JupiterMockModeTest {
         assertTrue("init failed ($scenarioLabel, errorCode=${initErrorCode.get()})", initSuccess.get())
         assertNull("init returned errorCode ($scenarioLabel, errorCode=${initErrorCode.get()})", initErrorCode.get())
 
-        manager.setMockMode(scenario.mockMode)
-        manager.startService(scenario.userMode, delegate)
+        // 2.0.37: setMockMode/startService 모두 sectorId required. completion 람다는
+        //   SDK .aar R8 metadata strip 때문에 default args 적용 불가 → 명시해야 함.
+        manager.setMockMode(scenario.mockMode, sectorId) { _ -> }
+        manager.startService(scenario.userMode, sectorId, delegate)
         assertTrue(
             "mock result timeout ($scenarioLabel, startSuccess=${startSuccess.get()}, startErrorCode=${startErrorCode.get()})",
             resultLatch.await(RESULT_TIMEOUT_SEC, TimeUnit.SECONDS)
