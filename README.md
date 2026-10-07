@@ -4,7 +4,7 @@
 
 TJJupiter-demo-android is a minimal Android sample app for integrating **TJLabs Jupiter SDK**.
 
-This demo app uses **TJLabs Jupiter SDK 2.0.31**.
+This demo app uses **TJLabs Jupiter SDK 2.0.37**.
 
 The app demonstrates a simple Jupiter service lifecycle with:
 - Authentication (`AUTH`)
@@ -64,7 +64,7 @@ dependencyResolutionManagement {
 Add dependency:
 
 ```kotlin
-implementation("com.github.tjlabs:TJLabsJupiter-sdk-android:2.0.31")
+implementation("com.github.tjlabs:TJLabsJupiter-sdk-android:2.0.37")
 ```
 
 Set credentials in `local.properties`:
@@ -176,12 +176,19 @@ Sector ID note:
 
 ### 4. Start Service
 
+**2.0.37 breaking change** — `sectorId` is now **required**. The SDK no longer falls back
+to an "active sector" when the parameter is omitted, so the caller must pass the sector
+explicitly on every start. This prevents sector confusion in multi-sector environments
+(iOS 2.0.37 parity, TJ-609).
+
 ```kotlin
-manager.startService(UserMode.MODE_VEHICLE, callback)
+manager.startService(UserMode.MODE_VEHICLE, sectorId = 20, callback)
 ```
 
 Input:
 - `mode: UserMode`
+- `sectorId: Int` — must be one of the sectors loaded via `initialize(...)`. If the
+  sector was not loaded, the SDK fails with `JupiterErrorCode.INVALID_SECTOR`.
 - `callback: JupiterServiceManager.JupiterServiceManagerDelegate`
 
 Output:
@@ -208,9 +215,13 @@ SDK 2.0.17 uses item-based mock data.
 Select a `JupiterMockMode`, apply it with `setMockMode(...)`, then start the service.
 
 ```kotlin
-manager.setMockMode(JupiterMockMode.VEHICLE_INDOOR_OUTDOOR)
-manager.startService(UserMode.MODE_VEHICLE, callback)
+manager.setMockMode(JupiterMockMode.VEHICLE_INDOOR_OUTDOOR, sectorId = 20)
+manager.startService(UserMode.MODE_VEHICLE, sectorId = 20, callback)
 ```
+
+Both `setMockMode(...)` and `startService(...)` require the same `sectorId` since
+2.0.37 — the mock timeline is sector-scoped and the SDK rejects a start whose target
+sector differs from the mock sector (`JupiterErrorCode.INVALID_SECTOR`).
 
 Available mock items:
 - `VEHICLE_INDOOR_OUTDOOR`
@@ -225,17 +236,20 @@ Demo app flow:
 
 ### 7. Replay
 
-SDK 2.0.17 organizes replay execution around replay file names.
+SDK 2.0.17 organizes replay execution around replay file names, and 2.0.37 adds the
+required `sectorId` parameter.
 
 ```kotlin
 manager.startReplayJupiterService(
     mode = UserMode.MODE_VEHICLE,
+    sectorId = 20,
     fileName = "REPLAY_FILE_NAME",
     callback = callback
 )
 ```
 
-The older `replayId + startServiceTime` overload remains available, but internally resolves to a replay file name.
+The older `replayId + startServiceTime` overload has been removed in 2.0.37 — callers
+should migrate to the file-name based overload above.
 
 ### 8. Delegate
 
@@ -300,3 +314,37 @@ If `startService(...)` is called before auth and initialize success, SDK can ret
 - PROD URL updated from the previous placeholder to `.jupiter.tjlabscorp.com`. Non-Korea
   regions (e.g. Saudi `me-central2`) are now routed automatically from the region prefix.
 - Requires Auth SDK ≥ 1.0.28 and Resource SDK ≥ 1.1.8, both pulled transitively.
+
+## 2.0.37 Notes
+
+Breaking changes (iOS 2.0.37 parity, TJ-609):
+
+- `startService(mode, callback)` → `startService(mode, sectorId, callback)` — `sectorId`
+  is required; no "active sector" fallback.
+- `startReplayJupiterService(mode, fileName, callback)` → `startReplayJupiterService(mode, sectorId, fileName, callback)`.
+- `setMockMode(mode)` → `setMockMode(mode, sectorId)` — mock timeline is sector-scoped.
+- New `INVALID_SECTOR` error (`JupiterErrorCode.INVALID_SECTOR`) fires when a start/mock
+  call references a sector that was not loaded in `initialize(...)`.
+- Deprecated overloads from earlier releases (`replayId + startServiceTime` style
+  replay API, no-sector mock/start) have been removed.
+
+New capability (opt-in):
+
+- Multi-sector initialize — `initialize(sectorIds: List<Int>, callback)` loads several
+  sectors in one combined bundle and lets the host switch active sector via
+  `startService(sectorId = ...)` without re-initializing.
+- Resource SDK 1.1.20 is pulled transitively; `GeofenceData.level_change_area` and the
+  entrance areas are polygon lists (point-in-polygon). SDK consumers of the public API
+  are not affected.
+
+Tracking stability fixes shipped with 2.0.37:
+
+- LSE `trace_id` is read live per request (no longer stuck on the init-time
+  `tenant_user_name` across batch replays).
+- `BuildingLevelChanger.checkInLevelChangeArea(...)` consumes polygon geofences and is
+  fed from `onGeofenceData` — restores PathMatcher `checkAll` wider search, BLC
+  level-change-area tagging, and multi-level candidate generation that were silently
+  dead when the schema moved to polygons.
+- DR misentry re-anchoring and `transitionExitConfirmed` gate (iOS parity) ported.
+- Session reset covers `curUvd` so a stop → start cycle does not leak the previous
+  session's last UVD into the next LSE request context.

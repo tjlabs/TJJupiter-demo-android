@@ -267,8 +267,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun initJupiter() {
-        // [Jupiter SDK 2.0.14 사용법 #2] 초기화
+        // [Jupiter SDK 2.0.37 사용법 #2] 초기화
         // AUTH 성공 후 sectorId 로 서비스를 초기화한다.
+        // 2.0.37 기준: initialize(sectorId, callback) 또는 initialize(sectorIds, callback) (멀티 섹터).
         if (!isAuthed) {
             appendLog("INIT 전에 AUTH 를 먼저 수행하세요.")
             return
@@ -292,7 +293,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun startJupiter() {
         // [Jupiter SDK 사용법 #2] 시작
-        // 2.0.5 기준: startService(mode, callback) 호출로 측위를 시작한다.
+        // 2.0.37 기준: startService(mode, sectorId, callback). sectorId 는 required —
+        //   initialize 때 로드한 섹터 중 하나여야 한다. 멀티 섹터 환경에서 활성 섹터를
+        //   매 start 마다 명시해 섹터 혼선을 방지한다 (iOS 2.0.37 parity, TJ-609).
         if (isServiceRunning) {
             appendLog("이미 Jupiter 서비스가 실행 중입니다.")
         }
@@ -318,7 +321,7 @@ class MainActivity : AppCompatActivity() {
                 "START 요청... mode=${userMode.value}, mock=OFF"
             }
         )
-        jupiterService.startService(userMode, jupiterCallback)
+        jupiterService.startService(userMode, sectorId, jupiterCallback)
     }
 
     private fun stopJupiter() {
@@ -340,9 +343,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun applyMockMode() {
-        // [Jupiter SDK 2.0.14 사용법 #4] Mock 데이터 item 적용
+        // [Jupiter SDK 2.0.37 사용법 #4] Mock 데이터 item 적용
         // 선택한 mock timeline을 로드한 뒤 START로 실행한다.
-        jupiterService.setMockMode(selectedMockMode)
+        // 2.0.37 기준: setMockMode(mode, sectorId) — 목업 데이터가 특정 섹터에 종속되므로
+        //   startService 때 지정하는 섹터와 동일한 sectorId 를 넘겨야 한다 (iOS parity, TJ-609).
+        // completion 람다 생략 불가 : SDK .aar 가 R8 로 Kotlin @Metadata 를 strip 하므로
+        //   호출자 쪽에서 default args 를 적용받지 못한다. 결과를 쓰지 않더라도 명시해야 함.
+        jupiterService.setMockMode(selectedMockMode, sectorId) { _ -> }
         isMockModeApplied = true
         appendLog("Mock item 적용 완료: ${selectedMockMode.name}")
         showToast("Mock item applied: ${selectedMockMode.name}")
