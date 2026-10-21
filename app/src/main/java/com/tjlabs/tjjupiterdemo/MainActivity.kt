@@ -44,6 +44,7 @@ class MainActivity : AppCompatActivity() {
     private var isServiceRunning = false
     private var selectedMockMode = JupiterMockMode.VEHICLE_INDOOR_OUTDOOR
     private var isMockModeApplied = false
+    private var isMockModeLoading = false
     private var didInitialPermissionRequest = false
 
     // 서버 · 데이터 옵션 (기본 PROD, save/upload 모두 OFF).
@@ -237,6 +238,20 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        // [Jupiter SDK 2.0.41 사용법] 포그라운드 복귀 시 BLE 스캔만 재시작
+        // 이 샘플은 foreground service 없이 동작하므로 백그라운드에서 OS 가 BLE 스캔을
+        //   제한/중지할 수 있다. restartScan 은 측위 세션 (UVD · 계산 · 경로) 은 유지한다.
+        // 서비스 미시작 / mock · replay 모드 / 직전 재시작 10초 이내면 SDK 가 거부한다.
+        if (!isServiceRunning || isMockModeApplied) return
+        jupiterService.restartScan { success, message ->
+            runOnUiThread {
+                appendLog("RESTART SCAN 결과: success=$success, message=$message")
+            }
+        }
+    }
+
     private fun authJupiter() {
         // [Jupiter SDK 2.0.14 사용법 #1] 서버 설정 후 인증
         // 서버 설정은 TJJupiterAuth.setServerConfig(provider, region)에서 관리한다.
@@ -307,6 +322,11 @@ class MainActivity : AppCompatActivity() {
             appendLog("START 전에 INIT 성공이 필요합니다. AUTH 후 INIT 결과를 확인하세요.")
         }
 
+        if (isMockModeLoading) {
+            appendLog("Mock item 로드 중입니다. 적용 완료 로그를 확인한 뒤 START 하세요.")
+            return
+        }
+
         if (!hasRequiredRuntimePermissions()) {
             val summary = missingPermissionsSummary()
             appendLog("필수 권한이 부족해 START를 중단했습니다: $summary")
@@ -348,11 +368,31 @@ class MainActivity : AppCompatActivity() {
         // 2.0.37 기준: setMockMode(mode, sectorId) — 목업 데이터가 특정 섹터에 종속되므로
         //   startService 때 지정하는 섹터와 동일한 sectorId 를 넘겨야 한다 (iOS parity, TJ-609).
         // completion 람다 생략 불가 : SDK .aar 가 R8 로 Kotlin @Metadata 를 strip 하므로
-        //   호출자 쪽에서 default args 를 적용받지 못한다. 결과를 쓰지 않더라도 명시해야 함.
-        jupiterService.setMockMode(selectedMockMode, sectorId) { _ -> }
-        isMockModeApplied = true
-        appendLog("Mock item 적용 완료: ${selectedMockMode.name}")
-        showToast("Mock item applied: ${selectedMockMode.name}")
+        //   호출자 쪽에서 default args 를 적용받지 못한다.
+        // 2.0.38 기준: completion 은 mock 데이터 다운로드 + 파싱 완료 후 Main thread 에서
+        //   비동기로 호출된다 (iOS parity). true 면 START 가능, false 면 SDK 가 mock 상태를
+        //   전부 리셋한 상태 (로드 실패 또는 initialize 에 없는 섹터).
+        if (isMockModeLoading) {
+            appendLog("Mock item 로드 중입니다. 잠시 후 다시 시도하세요.")
+            return
+        }
+        val mode = selectedMockMode
+        isMockModeLoading = true
+        isMockModeApplied = false
+        appendLog("Mock item 로드 요청... ${mode.name}, sectorId=$sectorId")
+        jupiterService.setMockMode(mode, sectorId) { isReady ->
+            runOnUiThread {
+                isMockModeLoading = false
+                isMockModeApplied = isReady
+                if (isReady) {
+                    appendLog("Mock item 적용 완료: ${mode.name} — START 가능")
+                    showToast("Mock item applied: ${mode.name}")
+                } else {
+                    appendLog("Mock item 적용 실패: ${mode.name} (로드 실패 또는 미로드 섹터)")
+                    showToast("Mock item failed: ${mode.name}")
+                }
+            }
+        }
     }
 
     private fun requestAllRequiredPermissions() {

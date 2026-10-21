@@ -203,6 +203,10 @@ Output:
 - `onJupiterResult(result)`
 - optional in/out and navigation callbacks
 
+`MODE_PEDESTRIAN` output (2.0.39+, iOS parity): `onJupiterResult` position comes from the
+single-epoch (LSE) result and `heading` is the OS (device) heading. Vehicle-only logic
+(path matching / route snapping) is not applied to pedestrian output.
+
 ### 5. Stop Service
 
 ```kotlin
@@ -214,15 +218,51 @@ manager.stopService { success, message ->
 Output:
 - callback `(success: Boolean, message: String)`
 
+### 5.1 (Optional) Restart BLE Scan (2.0.41+)
+
+Restarts only the BLE scan while keeping the positioning session (UVD, calculation and
+route state). Call it when the app returns to foreground **without a foreground service**,
+since Android may throttle or stop background BLE scanning.
+
+```kotlin
+override fun onResume() {
+    super.onResume()
+    manager.restartScan { success, message ->
+        // handle restart result
+    }
+}
+```
+
+Output:
+- callback `(success: Boolean, message: String)`
+
+Rejected (`success = false`) when:
+- the service is not started
+- running in mock or replay mode
+- called within 10 seconds of the previous restart
+
+The demo app calls `restartScan` from `MainActivity.onResume()` while a live (non-mock)
+session is running.
+
 ### 6. Mock Data Items
 
 Select a `JupiterMockMode`, apply it with `setMockMode(mode, sectorId, completion)`,
 then start the service with the **same** `sectorId`.
 
 ```kotlin
-manager.setMockMode(JupiterMockMode.VEHICLE_INDOOR_OUTDOOR, sectorId = 20) { _ -> }
-manager.startService(UserMode.MODE_VEHICLE, sectorId = 20, callback)
+manager.setMockMode(JupiterMockMode.VEHICLE_INDOOR_OUTDOOR, sectorId = 20) { isReady ->
+    if (isReady) {
+        manager.startService(UserMode.MODE_VEHICLE, sectorId = 20, callback)
+    }
+}
 ```
+
+`completion` is **asynchronous** since 2.0.38 (iOS parity): it fires on the main thread
+after the mock data is downloaded and parsed. `true` means the mock is ready; `false`
+means the load failed (or the sector was not loaded in `initialize(...)`) and the mock
+state is fully cleared. Start the service after `completion(true)` — polling
+`isMockModeEnabled()` is no longer needed. `JupiterMockMode.NONE` clears the mock and
+calls `completion(true)` immediately.
 
 Both calls require the same `sectorId` since 2.0.37 — the mock timeline is
 sector-scoped and the SDK rejects a start whose target sector differs from the mock
@@ -240,8 +280,8 @@ Available mock items:
 
 Demo app flow:
 - Select a mock item from the spinner.
-- Tap `APPLY MOCK ITEM`.
-- Tap `START`.
+- Tap `APPLY MOCK ITEM` and wait for the `Mock item 적용 완료` log (`completion(true)`).
+- Tap `START`. (`START` is ignored while the mock item is still loading.)
 
 ### 7. Replay
 
@@ -286,6 +326,9 @@ val callback = object : JupiterServiceManager.JupiterServiceManagerDelegate {
     override fun isNavigationRouteFailed() {}
 
     override fun isWaypointChanged(waypoints: List<List<Double>>) {}
+
+    // optional (default no-op)
+    override fun isUserArrived() {}
 }
 ```
 
@@ -298,9 +341,10 @@ Required order:
    - `TJJupiterAuth.setServerConfigForDevelopment(context, ...)` (DEV, internal QA only)
 2. `TJJupiterAuth.auth(...)`
 3. `manager.initialize(sectorId=..., callback)` or `manager.initialize(sectorIds=..., callback)`
-4. Optional: `manager.setMockMode(mode, sectorId) { _ -> }`
+4. Optional: `manager.setMockMode(mode, sectorId) { isReady -> ... }` — wait for `true`
 5. `manager.startService(mode, sectorId, callback)`
-6. `manager.stopService(completion)`
+6. Optional: `manager.restartScan(completion)` on foreground return
+7. `manager.stopService(completion)`
 
 If `startService(...)` is called before auth + init succeed, the SDK returns an
 init / auth error through the callback.
@@ -327,9 +371,36 @@ init / auth error through the callback.
 | `GENERATOR_PRECHECK_FAIL` | `13` | Generator precheck failed |
 | `INVALID_SECTOR` | `14` | start/mock sector was not loaded in `initialize(...)` (2.0.37+) |
 
-## 2.0.37 Notes
+## 2.0.41 Notes
 
-### Breaking changes (iOS 2.0.37 parity, TJ-609)
+Changes since 2.0.37 (2.0.38 – 2.0.41). No breaking API changes.
+
+### New API
+
+- `restartScan(completion)` — restart BLE scan only, keeping the positioning session
+  (see **5.1** above).
+
+### Behavior changes
+
+- `setMockMode(mode, sectorId, completion)` — `completion` is now an asynchronous
+  ready signal (2.0.38). Failed loads report `false` and clear mock state instead of
+  leaving the mock half-enabled.
+- `MODE_PEDESTRIAN` output uses the single-epoch (LSE) position with OS heading
+  (iOS parity). Vehicle-only path matching / route snapping is skipped for pedestrians.
+- Route start-point selection prefers route points on the user's current floor
+  before falling back to other floors (iOS TJ-645 parity).
+- Single-epoch requests send a rolling 5-second measurement window again, which
+  shortens time-to-first-fix in cold start.
+
+### Dependencies
+
+- Resource SDK `1.1.24` is pulled transitively (was `1.1.20` in 2.0.37).
+
+## Historical Notes
+
+### 2.0.37
+
+#### Breaking changes (iOS 2.0.37 parity, TJ-609)
 
 - `startService(mode, callback)` → `startService(mode, sectorId, callback)`.
   `sectorId` is required; no "active sector" fallback.
@@ -342,7 +413,7 @@ init / auth error through the callback.
 - Deprecated overloads from earlier releases (the `replayId + startServiceTime` style
   replay API, no-sector `setMockMode` / `startService`) have been removed.
 
-### New capabilities
+#### New capabilities
 
 - **Multi-sector initialize** — `initialize(sectorIds: List<Int>, callback)` loads
   several sectors in one combined bundle and lets the host switch active sector via
@@ -350,7 +421,7 @@ init / auth error through the callback.
 - Resource SDK `1.1.20` is pulled transitively; geofence data (`entrance_area`,
   `entrance_matching_area`, `level_change_area`) is polygon-list format.
 
-### Position-tracking stability fixes shipped with 2.0.37
+#### Position-tracking stability fixes
 
 - LSE `trace_id` is read live per request (no longer stuck on the init-time
   `tenant_user_name` across batch replays).
@@ -361,8 +432,6 @@ init / auth error through the callback.
 - DR misentry re-anchoring and `transitionExitConfirmed` gate ported from iOS.
 - Session reset covers `curUvd` so a stop → start cycle does not leak the previous
   session's last UVD into the next LSE request context.
-
-## Historical Notes
 
 ### 2.0.20
 - `TJJupiterAuth.setServerConfigForDevelopment(context, provider, region)` opt-in
