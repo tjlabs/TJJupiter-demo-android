@@ -69,7 +69,7 @@ jobs:
             echo "::error::version is required"
             exit 1
           fi
-          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
             echo "::error::Invalid semver: $VERSION"
             exit 1
           fi
@@ -204,6 +204,8 @@ jobs:
 
   bump:
     needs: [resolve-inputs, verify]
+    # 핫픽스 버전 (X.Y.Z-suffix, 예: 2.0.40-hotfix.1) 은 검증만 하고 demo main 기준 bump 브랜치는 만들지 않는다.
+    if: ${{ !contains(needs.resolve-inputs.outputs.version, '-') }}
     runs-on: ubuntu-latest
     outputs:
       branch: ${{ steps.pr.outputs.branch }}
@@ -270,7 +272,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Notify Slack (Success)
-        if: ${{ needs.verify.result == 'success' && needs.bump.result == 'success' }}
+        if: ${{ needs.verify.result == 'success' && (needs.bump.result == 'success' || needs.bump.result == 'skipped') }}
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         shell: bash
