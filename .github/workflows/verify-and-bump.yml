@@ -295,6 +295,35 @@ jobs:
           )
           curl -X POST -H 'Content-type: application/json' --data "$payload" "$SLACK_WEBHOOK_URL"
 
+      - name: Share release notes (Slack, deploy bot → Leo)
+        # 사용자 2026-11-20: 데모앱 release 브랜치 생성 + 검증 성공 뒤 외부 공유 문구를 deploy bot(옛 client key alert bot)
+        # 채널에 Leo 멘션으로. 문구 = SDK 레포 release-on-merge 가 dispatch client_payload.share_b64 로 넘긴 PR 본문 share 구간.
+        # secrets.SLACK_CLIENT_SECRET_WEBHOOK_URL (SDK 레포와 같은 웹훅) 이 없거나 문구가 없으면 건너뜀. best-effort.
+        if: ${{ needs.verify.result == 'success' && needs.bump.result == 'success' }}
+        continue-on-error: true
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_RELEASE_SHARE_WEBHOOK_URL || secrets.SLACK_CLIENT_SECRET_WEBHOOK_URL }}
+          OWNER_ID: ${{ vars.SLACK_RELEASE_SHARE_OWNER_ID || 'U02C6LA102G' }}
+          SHARE_B64: ${{ github.event.client_payload.share_b64 }}
+          VERSION: ${{ needs.resolve-inputs.outputs.version }}
+        shell: bash
+        run: |
+          if [[ -z "${SLACK_WEBHOOK_URL}" ]]; then
+            echo "deploy bot webhook is not set. Skip share notes."
+            exit 0
+          fi
+          NOTES=$(printf '%s' "${SHARE_B64}" | base64 -d 2>/dev/null || true)
+          if [[ -z "${NOTES//[[:space:]]/}" ]]; then
+            echo "share 문구 없음 (SDK PR 본문 share 구간) — 건너뜀"
+            exit 0
+          fi
+          payload=$(jq -n --arg text "<@${OWNER_ID}>
+
+          TJLabsJupiter SDK Android ${VERSION} 배포 · 데모앱 release/${VERSION} 검증 완료 — 외부 공유용 문구입니다.
+
+          ${NOTES}" '{text: $text}')
+          curl -fsS -X POST -H 'Content-type: application/json' --data "$payload" "$SLACK_WEBHOOK_URL"
+
       - name: Notify Slack (Failure)
         if: ${{ needs.verify.result != 'success' || needs.bump.result == 'failure' }}
         env:
